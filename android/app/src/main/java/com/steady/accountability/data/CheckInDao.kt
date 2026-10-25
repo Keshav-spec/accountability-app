@@ -13,4 +13,7 @@ interface CheckInDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveCheckIn(checkIn: DailyCheckInEntity)
+
+    @Query("SELECT * FROM daily_check_ins")
+    suspend fun all(): List<DailyCheckInEntity>
 }

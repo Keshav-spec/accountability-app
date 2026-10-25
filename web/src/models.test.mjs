@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { validateTaskTitle } from './models.js';
+import { setTaskStatus, toggleComplete, validateTaskTitle } from './models.js';
 
 test('rejects blank and overly long titles', () => {
   assert.equal(validateTaskTitle('  '), 'Add a task title to continue.');
@@ -8,3 +8,10 @@ test('rejects blank and overly long titles', () => {
 });
 
 test('accepts a short title', () => assert.equal(validateTaskTitle('Take a short walk'), null));
+
+test('task status changes are clear and reversible', () => {
+  const task = { id: 't', title: 'Walk', status: 'planned' };
+  assert.equal(setTaskStatus(task, 'skipped').status, 'skipped');
+  assert.equal(toggleComplete(task).status, 'completed');
+  assert.equal(toggleComplete({ ...task, status: 'completed' }).status, 'planned');
+});

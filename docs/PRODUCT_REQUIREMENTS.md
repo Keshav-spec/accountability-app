@@ -2,51 +2,40 @@
 
 ## Purpose and audience
 
-Steady is a personal accountability tool for one person who wants gentle structure during a week at home, across an Android phone and Windows 11 laptop. It should feel calm and encouraging, never punitive. Stage 1 is a product skeleton; it runs without accounts or network access.
+Steady is a local-first, single-user planner for a person who wants gentle structure during a week at home, across an Android phone and Windows 11 laptop. It should feel calm and encouraging; rest is a valid choice.
 
-## Core concepts
+## Data models
 
-- **Task**: `id` (stable string), `title`, optional `notes`, `scheduledDate` (ISO local date), optional `targetTime` (24-hour local time), `status` (`planned`, `completed`, `skipped`), `createdAt`, `updatedAt` (ISO timestamps).
-- **Daily check-in**: `date` (ISO local date), optional `morningPlan`, optional `eveningReflection`, `createdAt`, `updatedAt`.
-- A person can create a small set of daily tasks, complete or skip them, and reschedule them. A future sync layer must preserve these actions across both clients.
+- **Task**: `id`, `title`, optional `notes`, `scheduledDate` (ISO local date), optional `targetTime` (24-hour local time), `status` (`planned`, `completed`, `skipped`), `createdAt`, `updatedAt`.
+- **Daily check-in**: `date`, up to three `priorities`, optional `morningPlan`/intention, optional `progressNote`, optional `eveningReflection`, optional `dayOutcome` (`COMPLETE`, `MIXED`, `REST`), `createdAt`, `updatedAt`.
+- **Reminder settings**: enabled flag, selected local times, quiet-hours start/end, daily limit, snooze duration, stop-for-day date, snooze deadline, delivered date/count and delivered slot keys.
 
-## Stage 1 delivered scope
+## Stage 2 behavior
 
-- Android Kotlin/Jetpack Compose shell with Home, Tasks, and Check-in navigation and local Room storage.
-- Responsive web shell/PWA with matching navigation and local browser storage.
-- Empty states and safe sample tasks, with task creation and completion for a usable local-only demo.
-- Basic models and validation tests; setup and architecture notes.
-- Supabase setup choices documented; no credentials required for placeholder screens.
+- Tasks can be added, edited, completed, skipped and rescheduled. Status can be undone. Home groups today, upcoming and today's completed/skipped tasks.
+- Morning planning saves at most three priorities and a short intention. Progress check-in records whether the user started or wants a smaller step. Evening review saves a reflection and optional Complete/Mixed/Rest status.
+- Reminders default off. They run only when there is at least one planned task today, respect quiet hours, snooze, stop-for-day and a daily cap, and persist delivery keys to avoid duplicate sends after restart. Completing or skipping all today's tasks cancels future reminders.
+- Android uses WorkManager with inexact delayed work and Android notifications. The notification permission is requested on API 33+ only after the user chooses to enable reminders and sees a plain-language explanation.
+- Web notification permission is requested only from an explicit button. Reminders are scheduled locally while the page is open; browser scheduling can be delayed or stopped by browser/OS lifecycle rules.
+- Android stores tasks, check-ins and reminder preferences in Room. The web app stores local data in IndexedDB. Repository boundaries keep later remote sync separate from UI code.
 
-## Later feature roadmap
+## Privacy boundaries
 
-1. Add Supabase authentication, per-user task/check-in tables, Row Level Security, and sync with offline mutation queue and conflict policy.
-2. Add morning planning, a few scheduled progress check-ins, evening reflection, and configurable reminders, quiet hours, daily caps, snooze, stop-for-today, and completion/skip stopping rules.
-3. Add opt-in usage totals for the user's own dashboard and limits.
-4. Add opt-in restrictions for only the apps the user selects, including a clear pause/break flow and emergency bypass.
+- No task or reminder data goes to an AI model or remote service in Stage 2. Notification content stays on the device/browser.
+- No background user tracking, app usage access, accessibility service, app blocking, passwords, messages, contacts, location, browser history, social features or subscriptions.
+- Reminders are opt-in, configurable and disableable. The user can snooze or stop them for the day. Android never requests exact-alarm access; no precise-to-the-minute delivery promise is made.
+- Web reminders cannot reliably fire when the app page is closed or suspended. Browser/platform support varies.
+- Secrets stay out of source control. Stage 3 must add ownership-scoped tables and Row Level Security before remote data access.
 
-## Privacy and safety boundaries
+## Staged roadmap
 
-- Personal use only. No social features, public leaderboards, subscriptions, or AI chat/calls.
-- No task or usage data is sent to an AI model.
-- Do not collect passwords, message contents, contacts, location, or browser history.
-- Usage tracking and app blocking are not in Stage 1. They must be opt-in, transparent, and narrowly scoped.
-- Before any sensitive Android permission flow, explain in plain language what is needed and why, then let the user choose whether to open Settings.
-- Keep secrets out of source control. Use ignored local configuration and a publishable Supabase key only in clients; enforce ownership with database policies.
-- Stage 1 stores data only on the device/browser. Browser storage is separate from Room and is not yet synchronized.
+1. Foundation and matching Android/web shells (complete).
+2. Local task management, planning/check-ins and reminders (current).
+3. Supabase authentication, private schema, offline sync queue and conflict policy.
+4. Optional Android usage totals and selected-app restrictions, with explicit opt-in, plain-language permission explanation, pause/break flow and emergency bypass.
 
-## Unresolved setup choices
+## Platform/dependency choices
 
-- Supabase project URL and publishable key, project region, and authentication method.
-- Final table schema, deletion behavior, conflict resolution and initial sync strategy.
-- Product decisions for the user's reminder schedule and selected apps; do not infer them.
-
-## Platform and dependency choices
-
-- Android minimum API is 26, matching Supabase Kotlin client's documented minimum without desugaring. Target/compile API is 36.
-- Android versions selected from official stable documentation on 2026-10-25: AGP 8.13.2 / Gradle 8.13, Kotlin 2.3.21, Compose BOM 2026.09.00, Room 2.8.5, and KSP 2.3.12. Kotlin 2.3 fits AGP 8.13's documented compatibility range; AGP 8.13.2's R8 supports Kotlin 2.3. The project keeps to this established toolchain line to keep the setup simple for a beginner.
-- Web uses Vite 7 and TypeScript; it avoids a frontend framework until product screens outgrow the small shell.
-
-## Stage 1 acceptance
-
-Both shells start locally with the README instructions, show the same calm product concept, and support an offline local demo. Models are documented and tested. There are no secrets, sign-in, remote sync, usage access, accessibility service, app blocking, AI calls, or push notifications.
+- Android minimum API 26, compile/target API 36, AGP 8.13.2, Gradle 8.13, Kotlin 2.3.21, Compose BOM 2026.09.00, Room 2.8.5, WorkManager 2.12.0, Core KTX 1.19.1, Lifecycle Runtime KTX 2.11.0. The minimum Android API follows the planned Supabase Kotlin client’s documented minimum without desugaring.
+- WorkManager is used because it persists deferrable work across app restarts/reboots. It is inexact: Android battery and background rules may delay a reminder.
+- Web uses Vite 7, TypeScript and IndexedDB; it deliberately avoids remote services. Notification permission and persistent notification delivery depend on browser support.

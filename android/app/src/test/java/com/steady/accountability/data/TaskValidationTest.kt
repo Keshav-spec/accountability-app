@@ -13,4 +13,10 @@ class TaskValidationTest {
         assertEquals(TaskStatus.PLANNED, task.status)
         assertEquals(task.createdAt, task.updatedAt)
     }
+
+    @Test fun taskStatusCanBeCompletedSkippedAndRestored() {
+        assertEquals(TaskStatus.COMPLETED, TaskRules.setStatus(TaskStatus.COMPLETED))
+        assertEquals(TaskStatus.SKIPPED, TaskRules.setStatus(TaskStatus.SKIPPED))
+        assertEquals(TaskStatus.PLANNED, TaskRules.toggleComplete(TaskStatus.COMPLETED.name))
+    }
 }

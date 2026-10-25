@@ -16,4 +16,13 @@ interface TaskDao {
 
     @Query("UPDATE tasks SET status = :status, updatedAt = :updatedAt WHERE id = :id")
     suspend fun updateStatus(id: String, status: String, updatedAt: String)
+
+    @Query("SELECT * FROM tasks ORDER BY scheduledDate, createdAt")
+    fun allTasks(): Flow<List<TaskEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(task: TaskEntity)
+
+    @Query("SELECT COUNT(*) FROM tasks WHERE scheduledDate = :date AND status = 'PLANNED'")
+    suspend fun pendingCount(date: String): Int
 }

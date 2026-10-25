@@ -1,12 +1,12 @@
 # Steady — personal accountability
 
-A calm, single-user planner for a week at home. Stage 1 provides a local-first Android app and an installable responsive web app; accounts, sync, reminders and sensitive app controls come later.
+Steady is a calm, single-user planner for Android and Windows. Stage 2 adds local task management, daily planning/check-ins and opt-in local reminders. It works without Supabase or a network connection.
 
 ## Prerequisites
 
-- Android Studio, JDK 17, Android SDK Platform 36, and Gradle 8.13 available locally (Android Gradle Plugin 8.13.2, Kotlin 2.3.21).
+- Android Studio, JDK 17, Android SDK Platform 36, and Gradle 8.13 (AGP 8.13.2, Kotlin 2.3.21).
 - Node.js 20 or newer and npm (web app uses Vite 7).
-- Git. No Supabase account or credentials are needed to run the placeholder apps.
+- No Supabase account or credentials are needed for local use.
 
 ## Run the web app
 
@@ -16,27 +16,43 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. For a production preview, run `npm run build` then `npm run preview`. HTTPS or localhost is required for service workers and browser install support. Browser notifications are not part of Stage 1.
+Open the local URL printed by Vite. `npm test` runs the model and reminder-rule tests. `npm run build` makes a production PWA bundle; use `npm run preview` to preview it. Service workers and browser notifications require HTTPS or localhost. Browser reminders run while the app page is open; support varies by browser and OS.
 
 ## Run Android
 
-Set `ANDROID_HOME`/`sdk.dir` to your Android SDK, then run `gradle -p android installDebug` with an API 26+ emulator or connected phone. You can also open `android/` in Android Studio and select the `app` run configuration after configuring its Gradle distribution as Gradle 8.13. The app saves tasks and check-ins in a local Room database. No credentials are needed.
+Set `ANDROID_HOME` (or `sdk.dir` in ignored `android/local.properties`) to your Android SDK. With an API 26+ emulator/device connected:
 
-## Architecture
+```sh
+gradle -p android testDebugUnitTest
+gradle -p android installDebug
+```
 
-`android/` is a Kotlin/Compose client. Room is the local source of truth; a small repository boundary is intended to host the future sync queue. `web/` is a TypeScript/Vite PWA shell using localStorage for this stage. Both clients use the same conceptual task and daily check-in fields, described in [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md). Supabase authentication and Postgres are planned shared services, but remote sync and sign-in are deliberately not enabled yet.
+Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and select the `app` run configuration. The Android app stores tasks, check-ins, reminder preferences and delivery keys in Room. Android notifications require the notification permission on API 33 and later; the app explains this before opening the system prompt.
 
-## Supabase setup (for Stage 2)
+## Manual test checklist
 
-Create a Supabase project, note the project URL and publishable key from its Connect panel, then configure them locally as `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `web/.env.local` (ignored by Git). Android credentials should later be supplied through an ignored `android/local.properties`/Gradle local configuration and `BuildConfig`, never committed. Create private user-owned tables with Row Level Security before connecting either client. The placeholder screens do not read these values.
+1. Create a task with a title, notes, date and optional target time. Try a blank title, edit it and move it to a future date.
+2. Complete a task, undo it, skip it, and confirm today’s done/skipped list and upcoming list update.
+3. Add up to three morning priorities and an intention; save a progress check-in and evening reflection with Complete, Mixed or Rest. Reopen the app and confirm they remain.
+4. Configure reminder times, quiet hours and a daily limit. Enable reminders; confirm Android’s permission prompt (API 33+) or the browser’s explicit permission prompt. On Android, wait for a reminder and try Snooze and Stop today. In the browser, keep the app page open until a test reminder time and try the notification actions.
+5. Confirm quiet hours suppress or defer a reminder, completed/skipped tasks do not get further reminders, the daily limit is observed, and disabling reminders stops future reminders.
+6. Restart each app and confirm local tasks, check-ins and reminder settings remain. Try offline after the first web load.
 
-The `android/local.properties.example` file documents the local-only Android setup. Copy it to `android/local.properties` only when configuring a local SDK path or future credentials.
+## Architecture and privacy
 
-## Stage roadmap
+- `android/` uses Kotlin/Jetpack Compose, a repository boundary and Room. WorkManager persists inexact one-time reminder work across app/process restarts and device reboots.
+- `web/` uses TypeScript/Vite, IndexedDB for local data, and a service worker for the PWA shell and opt-in notifications.
+- Task/check-in fields are documented in [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md). Android runs reminder logic on-device; web uses only browser notification APIs. Notification text is not sent to a third party.
+- This stage has no sign-in, remote sync, AI, tracking, app usage access, or app blocking.
+- Android’s WorkManager notifications may be delayed by battery-saving rules. Browser reminders cannot be relied on while the app page is closed or suspended by the browser.
 
-1. Foundation and local-only shells (this stage).
-2. Supabase authentication, private schema and conflict-aware sync.
-3. Planning/check-in flows, reminder preferences and notifications.
-4. Optional Android usage totals and selected-app controls, with clear permission explanations and bypasses.
+## Supabase and Stage 3
 
-See [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md) for scope and privacy boundaries.
+Supabase is not connected yet. When preparing Stage 3, create a project and configure its URL and publishable key locally as `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `web/.env.local`; see [web/.env.example](web/.env.example). Android values belong in ignored local Gradle configuration. Never commit credentials. Stage 3 must first define private per-user tables, Row Level Security, sync queue behavior and conflict resolution before either client sends local data remotely.
+
+## Roadmap
+
+1. Foundation and matching app shells (complete).
+2. Local tasks, daily planning/check-ins and reminders (this stage).
+3. Supabase authentication and conflict-aware sync.
+4. Optional Android usage totals and selected-app controls, only with explicit opt-in and clear permission explanations.

@@ -20,8 +20,11 @@ data class Task(
 
 data class DailyCheckIn(
     val date: LocalDate,
-    val morningPlan: String? = null,
+    val priorities: List<String> = emptyList(),
+    val intention: String? = null,
+    val progressNote: String? = null,
     val eveningReflection: String? = null,
+    val dayOutcome: String? = null,
     val createdAt: Instant = Instant.now(),
     val updatedAt: Instant = createdAt,
 )
