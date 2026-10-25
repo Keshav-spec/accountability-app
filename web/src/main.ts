@@ -1,8 +1,10 @@
 import './style.css';
 import './stage2.css';
+import './stage3.css';
 import { today, setTaskStatus, validateTaskTitle, type Task, type DailyCheckIn } from './models.js';
 import { mayDeliver, nextReminder, recordDelivery } from './reminders.js';
 import { defaultState, LocalRepository, type AppState } from './localRepository';
+import { supabase, syncState, type SyncStatus } from './supabaseSync.js';
 
 const repo = new LocalRepository();
 let state: AppState = defaultState();
@@ -12,47 +14,87 @@ let editorOpen = false;
 let webRegistration: ServiceWorkerRegistration | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;
 let statusMessage = '';
+let syncStatus: SyncStatus = navigator.onLine ? 'needs attention' : 'offline';
+let accountEmail = '';
+let syncActive = false;
+let syncQueued = false;
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const checkInForToday = (): DailyCheckIn => state.checkIns[today()] ?? { date: today(), morningPlan: null, priorities: [], progressNote: null, eveningReflection: null, dayOutcome: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-const pendingToday = () => state.tasks.some((task) => task.scheduledDate === today() && task.status === 'planned');
+const pendingToday = () => state.tasks.some((task) => !task.deletedAt && task.scheduledDate === today() && task.status === 'planned');
 
-async function persist(): Promise<void> { await repo.save(state); scheduleReminder(); }
+async function persist(): Promise<void> { await repo.save(state); scheduleReminder(); if (supabase && accountEmail) void runSync(); }
+
+async function runSync(): Promise<void> {
+  if (!supabase || !accountEmail) return;
+  if (syncActive) { syncQueued = true; return; }
+  syncActive = true;
+  do {
+    syncQueued = false; syncStatus = 'syncing'; render();
+    try { syncStatus = await syncState(state, (next) => repo.save(next)); }
+    catch { syncStatus = navigator.onLine ? 'needs attention' : 'offline'; }
+  } while (syncQueued && navigator.onLine);
+  syncActive = false; render();
+}
+
+async function accountAction(action: 'signup' | 'signin'): Promise<void> {
+  if (!supabase) return;
+  const form = document.querySelector<HTMLFormElement>('#account-form'); if (!form) return;
+  const data = new FormData(form); const email = String(data.get('email') ?? '').trim(); const password = String(data.get('password') ?? '');
+  const result = action === 'signup' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
+  if (result.error) { statusMessage = result.error.message; render(); return; }
+  accountEmail = result.data.user?.email ?? email;
+  statusMessage = result.data.session ? 'Signed in. Syncing your local plan.' : 'Check your email to confirm your account, then sign in.';
+  render(); if (result.data.session) await runSync();
+}
+
+async function signOut(): Promise<void> { await supabase?.auth.signOut(); accountEmail = ''; syncStatus = navigator.onLine ? 'offline' : 'offline'; render(); }
 
 function render(): void {
   const app = document.querySelector<HTMLDivElement>('#app')!;
   const tabs = ['Today', 'Tasks', 'Check-in', 'Reminders'] as const;
-  app.innerHTML = `<div class="layout"><aside class="rail"><a class="brand" href="#"><span class="brand-mark">s</span><span>steady</span></a><div class="rail-label">YOUR SPACE</div><nav>${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}"><span class="nav-dot">${tab === 'Today' ? '◷' : tab === 'Tasks' ? '✓' : tab === 'Check-in' ? '♡' : '◌'}</span>${tab}</button>`).join('')}</nav><div class="rail-note"><span class="sun">☼</span><p>One step at a time is enough.</p></div></aside><main><header><div class="eyebrow">YOUR SPACE <span>·</span> ${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</div><div class="mobile-nav">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}">${tab}</button>`).join('')}</div></header><section class="content">${page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : remindersPage()}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section></main></div>`;
+  app.innerHTML = `<div class="layout"><aside class="rail"><a class="brand" href="#"><span class="brand-mark">s</span><span>steady</span></a><div class="rail-label">YOUR SPACE</div><nav>${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}"><span class="nav-dot">${tab === 'Today' ? '◷' : tab === 'Tasks' ? '✓' : tab === 'Check-in' ? '♡' : '◌'}</span>${tab}</button>`).join('')}</nav><div class="rail-note"><span class="sun">☼</span><p>One step at a time is enough.</p></div></aside><main><header><div class="eyebrow">YOUR SPACE <span>·</span> ${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</div><div class="account-strip"><span class="sync-state">${syncStatus}</span>${accountEmail ? `<span>${escapeHtml(accountEmail)}</span><button class="small-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button>` : '<button class="small-button" id="account-toggle">Account</button>'}</div><div class="mobile-nav">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}">${tab}</button>`).join('')}</div></header><section class="content">${!accountEmail && accountOpen ? accountPanel() : page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : remindersPage()}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section></main></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => button.addEventListener('click', () => { page = button.dataset.page as typeof page; editingId = null; editorOpen = false; render(); }));
   app.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((button) => button.addEventListener('click', () => changeStatus(button.dataset.id!, button.dataset.status as Task['status'])));
+  app.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach((button) => button.addEventListener('click', () => void deleteTask(button.dataset.delete!)));
   app.querySelectorAll<HTMLButtonElement>('[data-edit]').forEach((button) => button.addEventListener('click', () => { editingId = button.dataset.edit === 'new' ? null : button.dataset.edit!; editorOpen = true; render(); }));
   app.querySelector<HTMLFormElement>('#task-form')?.addEventListener('submit', saveTask);
   app.querySelector<HTMLButtonElement>('#cancel-edit')?.addEventListener('click', () => { editingId = null; editorOpen = false; render(); });
   app.querySelector<HTMLFormElement>('#checkin-form')?.addEventListener('submit', saveCheckIn);
   app.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', saveReminderSettings);
+  app.querySelector<HTMLButtonElement>('#account-toggle')?.addEventListener('click', () => { accountOpen = !accountOpen; render(); });
+  app.querySelector<HTMLButtonElement>('#signout')?.addEventListener('click', () => void signOut());
+  app.querySelector<HTMLButtonElement>('#sync-now')?.addEventListener('click', () => void runSync());
+  app.querySelector<HTMLButtonElement>('#signin')?.addEventListener('click', () => void accountAction('signin'));
+  app.querySelector<HTMLButtonElement>('#signup')?.addEventListener('click', () => void accountAction('signup'));
   app.querySelector<HTMLButtonElement>('#enable-browser-reminders')?.addEventListener('click', enableBrowserReminders);
   app.querySelector<HTMLButtonElement>('#stop-today')?.addEventListener('click', stopRemindersToday);
   app.querySelector<HTMLButtonElement>('#disable-reminders')?.addEventListener('click', () => void disableReminders());
 }
 
+let accountOpen = false;
+function accountPanel(): string {
+  return `<div class="page-intro"><p class="eyebrow">OPTIONAL ACCOUNT</p><h1>Sync your plan</h1><p class="subhead">Your tasks stay on this device and sync when you sign in online.</p></div>${!supabase ? '<article class="check-card">Supabase is not configured. Local planning still works. Add the project URL and publishable key to web/.env.local to enable accounts.</article>' : `${syncStatus === 'needs attention' ? '<article class="check-card">Sync needs attention. Check your connection, account, and Supabase setup. Your local edits remain saved here.</article>' : ''}<form id="account-form" class="check-card"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="current-password" minlength="8" required></label><div class="form-actions"><button class="primary-button" id="signin" type="button">Sign in</button><button class="small-button" id="signup" type="button">Create account</button></div></form>`}`;
+}
+
 function todayPage(): string {
   const date = today();
-  const active = state.tasks.filter((task) => task.scheduledDate === date && task.status === 'planned');
-  const done = state.tasks.filter((task) => task.scheduledDate === date && task.status !== 'planned');
-  const upcoming = state.tasks.filter((task) => task.scheduledDate > date && task.status === 'planned').sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
+  const active = state.tasks.filter((task) => !task.deletedAt && task.scheduledDate === date && task.status === 'planned');
+  const done = state.tasks.filter((task) => !task.deletedAt && task.scheduledDate === date && task.status !== 'planned');
+  const upcoming = state.tasks.filter((task) => !task.deletedAt && task.scheduledDate > date && task.status === 'planned').sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
   return `<div class="welcome"><div class="welcome-copy"><p class="eyebrow">A GENTLER WAY TO GET THINGS DONE</p><h1>A little structure,<br>with room to breathe.</h1><p class="subhead">Small steps count. So does taking a pause.</p></div><div class="orbit" aria-hidden="true"><span>✳</span></div></div><article class="plan-card"><div class="card-heading"><div><p class="eyebrow">TODAY</p><h2>Your gentle plan</h2></div><div class="progress"><strong>${done.filter((task) => task.status === 'completed').length}</strong> / ${state.tasks.filter((task) => task.scheduledDate === date).length}</div></div>${taskList(active)}<button class="text-button" data-edit="new">＋ &nbsp; Add a small task</button>${done.length ? `<h3 class="section-label">DONE OR SKIPPED TODAY</h3>${taskList(done)}` : ''}</article>${upcoming.length ? `<article class="plan-card secondary-card"><p class="eyebrow">COMING UP</p><h2>When you’re ready</h2>${taskList(upcoming)}</article>` : ''}<p class="soft-prompt"><span>✦</span> You don’t have to do it all. Just begin where you are.</p>${editorOpen ? taskEditor() : ''}`;
 }
 
 function tasksPage(): string {
   const date = today();
-  const upcoming = state.tasks.filter((task) => task.scheduledDate >= date && task.status === 'planned').sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
-  const history = state.tasks.filter((task) => task.scheduledDate === date && task.status !== 'planned');
+  const upcoming = state.tasks.filter((task) => !task.deletedAt && task.scheduledDate >= date && task.status === 'planned').sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate));
+  const history = state.tasks.filter((task) => !task.deletedAt && task.scheduledDate === date && task.status !== 'planned');
   return `<div class="page-intro"><p class="eyebrow">YOUR LIST</p><h1>Tasks</h1><p class="subhead">Change the plan whenever you need.</p></div><button class="primary-button" data-edit="new">＋ &nbsp; Add a task</button><article class="plan-card task-manager"><h2>Today and coming up</h2>${taskList(upcoming, true)}</article>${history.length ? `<article class="plan-card task-manager"><h2>Completed and skipped today</h2>${taskList(history, true)}</article>` : ''}${editorOpen ? taskEditor() : ''}`;
 }
 
 function taskList(tasks: Task[], showDate = false): string {
   if (!tasks.length) return '<p class="empty">Nothing on this part of your list yet.</p>';
-  return `<div class="task-list">${tasks.map((task) => `<div class="task-row"><div class="task-main"><span class="task-title ${task.status === 'completed' ? 'done' : ''}">${escapeHtml(task.title)}</span><span class="task-meta">${showDate ? escapeHtml(task.scheduledDate) : ''}${task.targetTime ? ` · ${escapeHtml(task.targetTime)}` : ''}${task.status !== 'planned' ? ` · ${escapeHtml(task.status)}` : ''}</span>${task.notes ? `<span class="task-notes">${escapeHtml(task.notes)}</span>` : ''}</div><div class="task-actions"><button class="small-button" data-edit="${escapeHtml(task.id)}">Edit / move</button>${task.status === 'planned' ? `<button class="small-button" data-id="${escapeHtml(task.id)}" data-status="completed">Complete</button><button class="small-button subtle-button" data-id="${escapeHtml(task.id)}" data-status="skipped">Skip</button>` : `<button class="small-button subtle-button" data-id="${escapeHtml(task.id)}" data-status="planned">Undo</button>`}</div></div>`).join('')}</div>`;
+  return `<div class="task-list">${tasks.map((task) => `<div class="task-row"><div class="task-main"><span class="task-title ${task.status === 'completed' ? 'done' : ''}">${escapeHtml(task.title)}</span><span class="task-meta">${showDate ? escapeHtml(task.scheduledDate) : ''}${task.targetTime ? ` · ${escapeHtml(task.targetTime)}` : ''}${task.status !== 'planned' ? ` · ${escapeHtml(task.status)}` : ''}</span>${task.notes ? `<span class="task-notes">${escapeHtml(task.notes)}</span>` : ''}</div><div class="task-actions"><button class="small-button" data-edit="${escapeHtml(task.id)}">Edit / move</button>${task.status === 'planned' ? `<button class="small-button" data-id="${escapeHtml(task.id)}" data-status="completed">Complete</button><button class="small-button subtle-button" data-id="${escapeHtml(task.id)}" data-status="skipped">Skip</button>` : `<button class="small-button subtle-button" data-id="${escapeHtml(task.id)}" data-status="planned">Undo</button>`}<button class="small-button subtle-button" data-delete="${escapeHtml(task.id)}">Delete</button></div></div>`).join('')}</div>`;
 }
 
 function taskEditor(): string {
@@ -83,15 +125,21 @@ async function saveTask(event: SubmitEvent): Promise<void> {
   const date = String(data.get('date')); const time = String(data.get('time'));
   if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { form.querySelector('#task-error')!.textContent = 'Use a 24-hour target time.'; return; }
   const old = state.tasks.find((task) => task.id === editingId); const stamp = new Date().toISOString();
-  const task: Task = { id: old?.id ?? crypto.randomUUID(), title: title.trim(), notes: String(data.get('notes') ?? '').trim() || null, scheduledDate: date, targetTime: time || null, status: old?.status ?? 'planned', createdAt: old?.createdAt ?? stamp, updatedAt: stamp };
+  const task: Task = { id: old?.id ?? crypto.randomUUID(), title: title.trim(), notes: String(data.get('notes') ?? '').trim() || null, scheduledDate: date, targetTime: time || null, status: old?.status ?? 'planned', createdAt: old?.createdAt ?? stamp, updatedAt: stamp, syncPending: true, deletedAt: null };
   if (old) state.tasks = state.tasks.map((item) => item.id === old.id ? task : item); else state.tasks.push(task);
   editingId = null; editorOpen = false; statusMessage = 'Task saved on this device.'; await persist(); render();
 }
 
 async function changeStatus(id: string, status: Task['status']): Promise<void> {
-  state.tasks = state.tasks.map((task) => task.id === id ? setTaskStatus(task, status) : task);
+  state.tasks = state.tasks.map((task) => task.id === id ? { ...setTaskStatus(task, status), syncPending: true } : task);
   statusMessage = status === 'completed' ? 'Marked complete. You can undo this any time.' : status === 'skipped' ? 'Skipped for now. That’s okay.' : 'Task moved back to your plan.';
   await persist(); render();
+}
+
+async function deleteTask(id: string): Promise<void> {
+  const stamp = new Date().toISOString();
+  state.tasks = state.tasks.map((task) => task.id === id ? { ...task, deletedAt: stamp, updatedAt: stamp, syncPending: true } : task);
+  statusMessage = 'Task deleted. It will stay deleted across your devices.'; await persist(); render();
 }
 
 async function saveCheckIn(event: SubmitEvent): Promise<void> {
@@ -100,7 +148,7 @@ async function saveCheckIn(event: SubmitEvent): Promise<void> {
   const progressType = String(data.get('progress') ?? ''); const note = String(data.get('progressNote') ?? '').trim();
   const progressNote = progressType === 'started' ? `Started${note ? `: ${note}` : ''}` : progressType === 'smaller' ? `Smaller${note ? `: ${note}` : ''}` : note || null;
   const existing = state.checkIns[date]; const stamp = new Date().toISOString();
-  state.checkIns[date] = { date, priorities, morningPlan: String(data.get('intention') ?? '').trim() || null, progressNote, eveningReflection: String(data.get('reflection') ?? '').trim() || null, dayOutcome: String(data.get('outcome') ?? '') || null, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp };
+  state.checkIns[date] = { date, priorities, morningPlan: String(data.get('intention') ?? '').trim() || null, progressNote, eveningReflection: String(data.get('reflection') ?? '').trim() || null, dayOutcome: String(data.get('outcome') ?? '') || null, createdAt: existing?.createdAt ?? stamp, updatedAt: stamp, syncPending: true };
   statusMessage = 'Check-in saved on this device.'; await persist(); render();
 }
 
@@ -155,7 +203,17 @@ async function handleReminderAction(action: string): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  state = await repo.load(); render();
+  state = await repo.load();
+  if (supabase) {
+    const { data: { session } } = await supabase.auth.getSession();
+    accountEmail = session?.user.email ?? '';
+    syncStatus = navigator.onLine ? (accountEmail ? 'syncing' : 'offline') : 'offline';
+    if (accountEmail) void runSync();
+    supabase.auth.onAuthStateChange((_event, current) => { accountEmail = current?.user.email ?? ''; if (accountEmail) void runSync(); else render(); });
+  }
+  window.addEventListener('online', () => { syncStatus = 'syncing'; void runSync(); });
+  window.addEventListener('offline', () => { syncStatus = 'offline'; render(); });
+  render();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     try { webRegistration = await navigator.serviceWorker.register('/sw.js'); await navigator.serviceWorker.ready; scheduleReminder(); } catch { /* Web reminders stay unavailable if service workers are blocked. */ }
     navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => { if (event.data?.type === 'reminder-action') void handleReminderAction(event.data.action); });

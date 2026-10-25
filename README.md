@@ -1,12 +1,12 @@
 # Steady — personal accountability
 
-Steady is a calm, single-user planner for Android and Windows. Stage 2 adds local task management, daily planning/check-ins and opt-in local reminders. It works without Supabase or a network connection.
+Steady is a calm, single-user planner for Android and Windows. Stage 3 adds optional Supabase accounts and task/check-in sync on top of the local task management, daily planning/check-ins and opt-in local reminders. It works locally without Supabase credentials or a network connection.
 
 ## Prerequisites
 
 - Android Studio, JDK 17, Android SDK Platform 36, and Gradle 8.13 (AGP 8.13.2, Kotlin 2.3.21).
 - Node.js 20 or newer and npm (web app uses Vite 7).
-- No Supabase account or credentials are needed for local use.
+- Supabase is optional. Without it, the apps continue to work from Room/IndexedDB.
 
 ## Run the web app
 
@@ -37,18 +37,21 @@ Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and sele
 4. Configure reminder times, quiet hours and a daily limit. Enable reminders; confirm Android’s permission prompt (API 33+) or the browser’s explicit permission prompt. On Android, wait for a reminder and try Snooze and Stop today. In the browser, keep the app page open until a test reminder time and try the notification actions.
 5. Confirm quiet hours suppress or defer a reminder, completed/skipped tasks do not get further reminders, the daily limit is observed, and disabling reminders stops future reminders.
 6. Restart each app and confirm local tasks, check-ins and reminder settings remain. Try offline after the first web load.
+7. For configured Supabase: create/sign in to the same account on Android and Windows, create a task on Android and confirm it appears on Windows, edit it on Windows and confirm the change appears on Android. Also verify check-ins, offline edits, deletion tombstones, and RLS using a second account. See [docs/STAGE3_SUPABASE.md](docs/STAGE3_SUPABASE.md).
 
 ## Architecture and privacy
 
 - `android/` uses Kotlin/Jetpack Compose, a repository boundary and Room. WorkManager persists inexact one-time reminder work across app/process restarts and device reboots.
 - `web/` uses TypeScript/Vite, IndexedDB for local data, and a service worker for the PWA shell and opt-in notifications.
 - Task/check-in fields are documented in [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md). Android runs reminder logic on-device; web uses only browser notification APIs. Notification text is not sent to a third party.
-- This stage has no sign-in, remote sync, AI, tracking, app usage access, or app blocking.
+- Sign-in and optional task/check-in sync use Supabase only when configured. The app makes no AI calls and performs no background tracking, app usage access, or app blocking.
 - Android’s WorkManager notifications may be delayed by battery-saving rules. Browser reminders cannot be relied on while the app page is closed or suspended by the browser.
 
-## Supabase and Stage 3
+## Accounts and sync (optional)
 
-Supabase is not connected yet. When preparing Stage 3, create a project and configure its URL and publishable key locally as `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` in `web/.env.local`; see [web/.env.example](web/.env.example). Android values belong in ignored local Gradle configuration. Never commit credentials. Stage 3 must first define private per-user tables, Row Level Security, sync queue behavior and conflict resolution before either client sends local data remotely.
+Create a Supabase project and apply [`supabase/migrations/20261025000000_stage3_sync.sql`](supabase/migrations/20261025000000_stage3_sync.sql). Follow [docs/STAGE3_SUPABASE.md](docs/STAGE3_SUPABASE.md) to configure email/password auth, per-user RLS, web/Android local configuration, redirect URLs, and the two-device manual checklist. Web configuration goes in ignored `web/.env.local`; Android configuration goes in ignored `android/local.properties` (copy `android/local.properties.example`). Use only the project URL and publishable key. Never commit a service-role key.
+
+When configured, local changes queue on-device and sync on sign-in, launch, and reconnect. The latest `updated_at` wins; remote wins timestamp ties. Deletions are tombstones. Failed sync leaves local data intact and shows the sync state. Current sync supports tasks and daily check-ins; reminder schedules remain local. Cross-device sync has not been verified against a real Supabase project unless the two-device checklist has been run.
 
 ## Roadmap
 

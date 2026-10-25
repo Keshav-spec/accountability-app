@@ -14,4 +14,6 @@ data class DailyCheckInEntity(
     val dayOutcome: String? = null,
     val createdAt: String,
     val updatedAt: String,
+    val deletedAt: String? = null,
+    @ColumnInfo(defaultValue = "0") val syncPending: Boolean = false,
 )

@@ -4,7 +4,7 @@ export type ReminderSettings = {
   enabled: boolean; times: string[]; quietStart: string; quietEnd: string; dailyLimit: number; snoozeMinutes: number;
   stoppedDate: string | null; snoozeUntil: number | null; deliveredDate: string | null; deliveredCount: number; deliveredSlots: string[];
 };
-export type AppState = { tasks: Task[]; checkIns: Record<string, DailyCheckIn>; reminders: ReminderSettings };
+export type AppState = { tasks: Task[]; checkIns: Record<string, DailyCheckIn>; reminders: ReminderSettings; syncOwnerId?: string | null };
 
 export function defaultState(): AppState {
   const stamp = new Date().toISOString();
@@ -23,7 +23,7 @@ function migrate(value: any): AppState {
   const defaults = defaultState();
   const oldCheckIn = value?.checkIn;
   const checkIns = value?.checkIns ?? (oldCheckIn ? { [oldCheckIn.date || today()]: { ...oldCheckIn, priorities: oldCheckIn.priorities ?? [], progressNote: null, dayOutcome: null } } : defaults.checkIns);
-  return { ...defaults, ...value, checkIns, reminders: { ...defaults.reminders, ...value?.reminders } } as AppState;
+  return { ...defaults, ...value, checkIns, reminders: { ...defaults.reminders, ...value?.reminders }, syncOwnerId: value?.syncOwnerId ?? null } as AppState;
 }
 
 export class LocalRepository {

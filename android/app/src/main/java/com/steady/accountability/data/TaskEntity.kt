@@ -2,6 +2,7 @@ package com.steady.accountability.data
 
 import androidx.room.Entity
 import androidx.room.PrimaryKey
+import androidx.room.ColumnInfo
 
 @Entity(tableName = "tasks")
 data class TaskEntity(
@@ -13,4 +14,6 @@ data class TaskEntity(
     val status: String,
     val createdAt: String,
     val updatedAt: String,
+    val deletedAt: String? = null,
+    @ColumnInfo(defaultValue = "0") val syncPending: Boolean = false,
 )

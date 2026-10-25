@@ -16,4 +16,7 @@ interface CheckInDao {
 
     @Query("SELECT * FROM daily_check_ins")
     suspend fun all(): List<DailyCheckInEntity>
+
+    @Query("SELECT * FROM daily_check_ins") suspend fun allForSync(): List<DailyCheckInEntity>
+    @Query("UPDATE daily_check_ins SET syncPending = 0 WHERE date = :date") suspend fun markSynced(date: String)
 }

@@ -4,6 +4,8 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.net.ConnectivityManager
+import android.net.Network
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -24,33 +26,56 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.steady.accountability.data.*
 import com.steady.accountability.reminders.ReminderScheduler
+import io.github.jan.supabase.auth.handleDeeplinks
 import kotlinx.coroutines.launch
 
 private val Sage = Color(0xFF375A50)
 private val Cream = Color(0xFFF7F5EF)
 private val Ink = Color(0xFF24312E)
-private val Tabs = listOf("Today", "Tasks", "Check-in", "Reminders")
+private val Tabs = listOf("Today", "Tasks", "Check-in", "Reminders", "Account")
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (SupabaseSync.configured) runCatching { SupabaseSync.client.handleDeeplinks(intent) }
         val db = DatabaseProvider.get(applicationContext)
         lifecycleScope.launch { ReminderScheduler.refresh(applicationContext) }
-        setContent { SteadyApp(TaskRepository(db.taskDao()), CheckInRepository(db.checkInDao()), ReminderSettingsRepository(db.reminderSettingsDao())) }
+        setContent { SteadyApp(TaskRepository(db.taskDao()), CheckInRepository(db.checkInDao()), ReminderSettingsRepository(db.reminderSettingsDao()), db.taskDao(), db.checkInDao()) }
     }
 }
 
 @Composable
-private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, settingsRepository: ReminderSettingsRepository) {
+private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, settingsRepository: ReminderSettingsRepository, taskDao: TaskDao, checkInDao: CheckInDao) {
     var selected by remember { mutableStateOf("Today") }
     var editing by remember { mutableStateOf<TaskEntity?>(null) }
     var showNew by remember { mutableStateOf(false) }
     var permissionExplanation by remember { mutableStateOf(false) }
     val tasks by repository.allTasks().collectAsState(initial = emptyList())
+    val visibleTasks = tasks.filter { it.deletedAt == null }
     val checkIn by checkIns.forDate().collectAsState(initial = null)
     val settings by settingsRepository.observe().collectAsState(initial = null)
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
+    var syncState by remember { mutableStateOf(if (SupabaseSync.configured) "Offline" else "Local only") }
+    var accountMessage by remember { mutableStateOf("") }
+    var accountEmail by remember { mutableStateOf("") }
+    var emailInput by remember { mutableStateOf("") }
+    var passwordInput by remember { mutableStateOf("") }
+    val prefs = remember { context.getSharedPreferences("steady-sync", android.content.Context.MODE_PRIVATE) }
+    val syncNow: suspend () -> Unit = {
+        if (SupabaseSync.configured && SupabaseSync.userId() != null) {
+            syncState = "Syncing"
+            try { syncState = SupabaseSync.sync(taskDao, checkInDao, { prefs.edit().putString("owner", it).apply() }, prefs.getString("owner", null)) }
+            catch (_: Exception) { syncState = if (context.getSystemService(ConnectivityManager::class.java).activeNetwork == null) "Offline" else "Needs attention" }
+        }
+    }
+    LaunchedEffect(Unit) { if (SupabaseSync.configured) runCatching { SupabaseSync.client.auth.awaitInitialization(); SupabaseSync.userId() }.getOrNull()?.let { if (it.isNotBlank()) { accountEmail = "Signed in"; syncNow() } } }
+    DisposableEffect(Unit) {
+        val manager = context.getSystemService(ConnectivityManager::class.java)
+        val callback = object : ConnectivityManager.NetworkCallback() { override fun onAvailable(network: Network) { scope.launch { syncNow() } }; override fun onLost(network: Network) { syncState = "Offline" } }
+        manager.registerDefaultNetworkCallback(callback)
+        onDispose { runCatching { manager.unregisterNetworkCallback(callback) } }
+    }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         if (granted) scope.launch { settingsRepository.save((settings ?: ReminderSettingsEntity()).copy(enabled = true)); ReminderScheduler.refresh(context) }
     }
@@ -66,10 +91,14 @@ private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, s
                 Text("STEADY  ·  YOUR SPACE", style = MaterialTheme.typography.labelMedium, color = Sage, fontWeight = FontWeight.Bold)
                 Spacer(Modifier.height(16.dp))
                 when (selected) {
-                    "Tasks" -> TaskListScreen(tasks, onEdit = { editing = it; showNew = true }, onStatus = { task, status -> scope.launch { repository.setStatus(task, status); ReminderScheduler.refresh(context) } })
-                    "Check-in" -> CheckInScreen(checkIn) { priorities, intention, progress, reflection, outcome -> scope.launch { checkIns.save(java.time.LocalDate.now().toString(), intention, priorities, progress, reflection, outcome, checkIn) } }
+                    "Account" -> AccountScreen(SupabaseSync.configured, syncState, accountEmail, accountMessage, emailInput, { emailInput = it }, passwordInput, { passwordInput = it },
+                        onSignIn = { scope.launch { try { SupabaseSync.signIn(emailInput, passwordInput); accountEmail = "Signed in"; accountMessage = "Signed in successfully."; syncNow() } catch (_: Exception) { accountMessage = "Sign in could not be completed. Check your details and connection." } } },
+                        onSignUp = { scope.launch { try { SupabaseSync.signUp(emailInput, passwordInput); accountMessage = "If email confirmation is enabled, check your inbox before signing in." } catch (_: Exception) { accountMessage = "Account creation could not be completed. Check your details and connection." } } },
+                        onSignOut = { scope.launch { runCatching { SupabaseSync.signOut() }; accountEmail = ""; syncState = "Offline"; accountMessage = "Signed out. Your local plan remains available." } }, onSync = { scope.launch { syncNow() } })
+                    "Tasks" -> TaskListScreen(visibleTasks, onEdit = { editing = it; showNew = true }, onStatus = { task, status -> scope.launch { repository.setStatus(task, status); ReminderScheduler.refresh(context); syncNow() } }, onDelete = { task -> scope.launch { repository.delete(task); syncNow() } })
+                    "Check-in" -> CheckInScreen(checkIn) { priorities, intention, progress, reflection, outcome -> scope.launch { checkIns.save(java.time.LocalDate.now().toString(), intention, priorities, progress, reflection, outcome, checkIn); syncNow() } }
                     "Reminders" -> ReminderSettingsScreen(settings ?: ReminderSettingsEntity(), onSave = { value -> scope.launch { settingsRepository.save(value); ReminderScheduler.refresh(context) } }, onEnable = { permissionExplanation = true }, onStopToday = { scope.launch { settingsRepository.save((settings ?: ReminderSettingsEntity()).copy(stoppedDate = java.time.LocalDate.now().toString())); ReminderScheduler.refresh(context) } })
-                    else -> TodayScreen(tasks, onEdit = { editing = it; showNew = true }, onStatus = { task, status -> scope.launch { repository.setStatus(task, status); ReminderScheduler.refresh(context) } })
+                    else -> TodayScreen(visibleTasks, onEdit = { editing = it; showNew = true }, onStatus = { task, status -> scope.launch { repository.setStatus(task, status); ReminderScheduler.refresh(context); syncNow() } }, onDelete = { task -> scope.launch { repository.delete(task); syncNow() } })
                 }
             }
         }
@@ -77,8 +106,8 @@ private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, s
             scope.launch {
                 val now = java.time.Instant.now().toString()
                 val original = editing
-                val item = TaskEntity(original?.id ?: java.util.UUID.randomUUID().toString(), title, notes.ifBlank { null }, date, time.ifBlank { null }, original?.status ?: TaskStatus.PLANNED.name, original?.createdAt ?: now, now)
-                if (repository.save(item)) { showNew = false; ReminderScheduler.refresh(context) }
+                val item = TaskEntity(original?.id ?: java.util.UUID.randomUUID().toString(), title, notes.ifBlank { null }, date, time.ifBlank { null }, original?.status ?: TaskStatus.PLANNED.name, original?.createdAt ?: now, now, syncPending = true)
+                if (repository.save(item)) { showNew = false; ReminderScheduler.refresh(context); syncNow() }
             }
         })
         if (permissionExplanation) AlertDialog(
@@ -96,7 +125,28 @@ private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, s
 }
 
 @Composable
-private fun TodayScreen(tasks: List<TaskEntity>, onEdit: (TaskEntity) -> Unit, onStatus: (TaskEntity, TaskStatus) -> Unit) {
+private fun AccountScreen(configured: Boolean, syncState: String, account: String, message: String, email: String, onEmail: (String) -> Unit, password: String, onPassword: (String) -> Unit, onSignIn: () -> Unit, onSignUp: () -> Unit, onSignOut: () -> Unit, onSync: () -> Unit) {
+    Text("Account and sync", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = Ink)
+    Text("Your plan stays available on this device when you are offline.", color = Color(0xFF68736F), modifier = Modifier.padding(top = 6.dp, bottom = 14.dp))
+    Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("Sync status: $syncState", fontWeight = FontWeight.SemiBold, color = Sage)
+            if (!configured) Text("Add Supabase URL and publishable key to android/local.properties to enable sign-in. Local planning still works.", color = Color(0xFF68736F))
+            else if (account.isNotBlank()) {
+                Text(account, color = Color(0xFF68736F))
+                Row { TextButton(onClick = onSync) { Text("Sync now") }; TextButton(onClick = onSignOut) { Text("Sign out") } }
+            } else {
+                OutlinedTextField(email, onEmail, label = { Text("Email") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(password, onPassword, label = { Text("Password") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row { TextButton(onClick = onSignIn) { Text("Sign in") }; TextButton(onClick = onSignUp) { Text("Create account") } }
+            }
+            if (message.isNotBlank()) Text(message, color = Color(0xFF68736F), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+private fun TodayScreen(tasks: List<TaskEntity>, onEdit: (TaskEntity) -> Unit, onStatus: (TaskEntity, TaskStatus) -> Unit, onDelete: (TaskEntity) -> Unit) {
     val today = java.time.LocalDate.now().toString()
     val todays = tasks.filter { it.scheduledDate == today }
     val active = todays.filter { it.status == TaskStatus.PLANNED.name }
@@ -106,29 +156,29 @@ private fun TodayScreen(tasks: List<TaskEntity>, onEdit: (TaskEntity) -> Unit, o
     Text("TODAY · ${active.count { it.status == TaskStatus.COMPLETED.name }} / ${todays.size}", style = MaterialTheme.typography.labelMedium, color = Sage, fontWeight = FontWeight.Bold)
     if (active.isEmpty()) Text("Nothing planned right now. A quiet day counts, too.", color = Color(0xFF68736F), modifier = Modifier.padding(vertical = 12.dp))
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
-        items(active, key = { it.id }) { task -> TaskCard(task, onEdit) { status -> onStatus(task, status) } }
+        items(active, key = { it.id }) { task -> TaskCard(task, onEdit, { status -> onStatus(task, status) }, { onDelete(task) }) }
         if (finished.isNotEmpty()) item { Text("ALREADY DONE OR SKIPPED", style = MaterialTheme.typography.labelMedium, color = Color(0xFF68736F), modifier = Modifier.padding(top = 12.dp)) }
-        items(finished, key = { it.id }) { task -> TaskCard(task, onEdit) { status -> onStatus(task, status) } }
+        items(finished, key = { it.id }) { task -> TaskCard(task, onEdit, { status -> onStatus(task, status) }, { onDelete(task) }) }
         val upcoming = tasks.filter { it.scheduledDate > today && it.status == TaskStatus.PLANNED.name }.sortedBy { it.scheduledDate }
         if (upcoming.isNotEmpty()) {
             item { Text("COMING UP", style = MaterialTheme.typography.labelMedium, color = Sage, modifier = Modifier.padding(top = 14.dp)) }
-            items(upcoming, key = { it.id }) { task -> TaskCard(task, onEdit) { status -> onStatus(task, status) } }
+            items(upcoming, key = { it.id }) { task -> TaskCard(task, onEdit, { status -> onStatus(task, status) }, { onDelete(task) }) }
         }
     }
 }
 
 @Composable
-private fun TaskListScreen(tasks: List<TaskEntity>, onEdit: (TaskEntity) -> Unit, onStatus: (TaskEntity, TaskStatus) -> Unit) {
+private fun TaskListScreen(tasks: List<TaskEntity>, onEdit: (TaskEntity) -> Unit, onStatus: (TaskEntity, TaskStatus) -> Unit, onDelete: (TaskEntity) -> Unit) {
     Text("Your tasks", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = Ink)
     Text("Change the plan whenever you need.", color = Color(0xFF68736F), modifier = Modifier.padding(top = 6.dp, bottom = 16.dp))
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 560.dp)) {
         if (tasks.isEmpty()) item { Text("Your list is ready when you are.", color = Color(0xFF68736F)) }
-        items(tasks.sortedWith(compareBy<TaskEntity> { it.scheduledDate }.thenBy { it.createdAt }), key = { it.id }) { task -> TaskCard(task, onEdit) { status -> onStatus(task, status) } }
+        items(tasks.sortedWith(compareBy<TaskEntity> { it.scheduledDate }.thenBy { it.createdAt }), key = { it.id }) { task -> TaskCard(task, onEdit, { status -> onStatus(task, status) }, { onDelete(task) }) }
     }
 }
 
 @Composable
-private fun TaskCard(task: TaskEntity, onEdit: (TaskEntity) -> Unit, onStatus: (TaskStatus) -> Unit) {
+private fun TaskCard(task: TaskEntity, onEdit: (TaskEntity) -> Unit, onStatus: (TaskStatus) -> Unit, onDelete: () -> Unit = {}) {
     Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 15.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -144,6 +194,7 @@ private fun TaskCard(task: TaskEntity, onEdit: (TaskEntity) -> Unit, onStatus: (
                     TextButton(onClick = { onStatus(TaskStatus.COMPLETED) }) { Text("Complete") }
                     TextButton(onClick = { onStatus(TaskStatus.SKIPPED) }) { Text("Skip") }
                 } else TextButton(onClick = { onStatus(TaskStatus.PLANNED) }) { Text("Undo") }
+                TextButton(onClick = onDelete) { Text("Delete") }
             }
         }
     }

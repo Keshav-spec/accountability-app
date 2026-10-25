@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
 }
 
@@ -17,7 +18,7 @@ android {
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     testOptions { unitTests.isIncludeAndroidResources = true }
 }
 
@@ -36,4 +37,18 @@ dependencies {
     implementation("androidx.core:core-ktx:1.19.1")
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
+    implementation("io.github.jan-tennert.supabase:auth-kt:3.6.0")
+    implementation("io.github.jan-tennert.supabase:postgrest-kt:3.6.0")
+    implementation("io.ktor:ktor-client-android:3.4.3")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.11.0")
+}
+
+val localConfig = java.util.Properties().apply {
+    val config = rootProject.file("local.properties")
+    if (config.exists()) config.inputStream().use(::load)
+}
+fun buildConfigValue(key: String): String = localConfig.getProperty(key, "").replace("\\", "\\\\").replace("\"", "\\\"")
+android.defaultConfig {
+    buildConfigField("String", "SUPABASE_URL", "\"${buildConfigValue("supabase.url")}\"")
+    buildConfigField("String", "SUPABASE_PUBLISHABLE_KEY", "\"${buildConfigValue("supabase.publishableKey")}\"")
 }

@@ -12,13 +12,13 @@ class TaskRepository(private val dao: TaskDao) {
     suspend fun add(title: String): Boolean {
         if (TaskValidation.titleError(title) != null) return false
         val now = Instant.now().toString()
-        dao.saveTask(TaskEntity(java.util.UUID.randomUUID().toString(), title.trim(), null, LocalDate.now().toString(), null, TaskStatus.PLANNED.name, now, now))
+        dao.saveTask(TaskEntity(java.util.UUID.randomUUID().toString(), title.trim(), null, LocalDate.now().toString(), null, TaskStatus.PLANNED.name, now, now, syncPending = true))
         return true
     }
 
     suspend fun save(task: TaskEntity): Boolean {
         if (TaskValidation.titleError(task.title) != null) return false
-        dao.upsert(task.copy(title = task.title.trim(), updatedAt = Instant.now().toString()))
+        dao.upsert(task.copy(title = task.title.trim(), updatedAt = Instant.now().toString(), syncPending = true))
         return true
     }
 
@@ -27,6 +27,8 @@ class TaskRepository(private val dao: TaskDao) {
     }
 
     suspend fun toggleComplete(task: TaskEntity) = setStatus(task, TaskRules.toggleComplete(task.status))
+
+    suspend fun delete(task: TaskEntity) { val now = Instant.now().toString(); dao.softDelete(task.id, now, now) }
 }
 
 class CheckInRepository(private val dao: CheckInDao) {
@@ -34,7 +36,7 @@ class CheckInRepository(private val dao: CheckInDao) {
 
     suspend fun save(date: String, morningPlan: String, priorities: List<String>, progressNote: String, eveningReflection: String, outcome: String?, existing: DailyCheckInEntity?) {
         val now = Instant.now().toString()
-        dao.saveCheckIn(DailyCheckInEntity(date, morningPlan.ifBlank { null }, eveningReflection.ifBlank { null }, priorities.joinToString("\n"), progressNote.ifBlank { null }, outcome, existing?.createdAt ?: now, now))
+        dao.saveCheckIn(DailyCheckInEntity(date, morningPlan.ifBlank { null }, eveningReflection.ifBlank { null }, priorities.joinToString("\n"), progressNote.ifBlank { null }, outcome, existing?.createdAt ?: now, now, syncPending = true))
     }
 }
 

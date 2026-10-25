@@ -8,6 +8,8 @@ export interface Task {
   status: TaskStatus;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  syncPending?: boolean;
 }
 export interface DailyCheckIn {
   date: string;
@@ -18,6 +20,8 @@ export interface DailyCheckIn {
   dayOutcome: string | null;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string | null;
+  syncPending?: boolean;
 }
 export function validateTaskTitle(title: string): string | null;
 export function today(date?: Date): string;

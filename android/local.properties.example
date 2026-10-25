@@ -1,3 +1,4 @@
-# Copy to local.properties for your own machine. Never commit local.properties.
-# sdk.dir=C\\:\\Users\\your-name\\AppData\\Local\\Android\\Sdk
-# Future Supabase values belong in local configuration and must never be committed.
+# Keep this file as a template; copy values into ignored android/local.properties.
+sdk.dir=C:\\Users\\YOUR_NAME\\AppData\\Local\\Android\\Sdk
+supabase.url=https://YOUR_PROJECT_ID.supabase.co
+supabase.publishableKey=sb_publishable_REPLACE_ME
