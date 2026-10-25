@@ -1,0 +1,3 @@
+# Copy to local.properties for your own machine. Never commit local.properties.
+# sdk.dir=C\\:\\Users\\your-name\\AppData\\Local\\Android\\Sdk
+# Future Supabase values belong in local configuration and must never be committed.

@@ -1,0 +1,15 @@
+# Local secrets and machine configuration
+.env
+.env.*
+!.env.example
+!**/.env.example
+local.properties
+
+# Build output and installed dependencies
+node_modules/
+web/dist/
+.gradle/
+**/build/
+.idea/
+*.iml
+.DS_Store
