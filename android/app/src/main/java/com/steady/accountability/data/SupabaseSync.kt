@@ -5,8 +5,6 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
-import io.github.jan.supabase.auth.signInWith
-import io.github.jan.supabase.auth.signUpWith
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import kotlinx.serialization.SerialName
@@ -39,17 +37,17 @@ object SupabaseSync {
         for (local in localTasks) {
             val remote = taskById[local.id]
             if (SyncRules.localWins(local.updatedAt, remote?.updatedAt)) {
-                client.from("tasks").upsert(local.toRemote(userId), onConflict = "id")
+                client.from("tasks").upsert(local.toRemote(userId)) { onConflict = "id" }
                 tasks.markSynced(local.id)
-            } else tasks.upsert(remote.toLocal())
+            } else if (remote != null) tasks.upsert(remote.toLocal())
         }
         val localCheckIns = checkIns.allForSync()
         for (local in localCheckIns) {
             val remote = checkInByDate[local.date]
             if (SyncRules.localWins(local.updatedAt, remote?.updatedAt)) {
-                client.from("daily_check_ins").upsert(local.toRemote(userId), onConflict = "user_id,date")
+                client.from("daily_check_ins").upsert(local.toRemote(userId)) { onConflict = "user_id,date" }
                 checkIns.markSynced(local.date)
-            } else checkIns.saveCheckIn(remote.toLocal())
+            } else if (remote != null) checkIns.saveCheckIn(remote.toLocal())
         }
         for (remote in remoteTasks) if (localTasks.none { it.id == remote.id }) tasks.upsert(remote.toLocal())
         for (remote in remoteCheckIns) if (localCheckIns.none { it.date == remote.date }) checkIns.saveCheckIn(remote.toLocal())

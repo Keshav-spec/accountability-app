@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.steady.accountability.data.*
 import com.steady.accountability.reminders.ReminderScheduler
+import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.handleDeeplinks
 import kotlinx.coroutines.launch
 
@@ -92,8 +93,8 @@ private fun SteadyApp(repository: TaskRepository, checkIns: CheckInRepository, s
                 Spacer(Modifier.height(16.dp))
                 when (selected) {
                     "Account" -> AccountScreen(SupabaseSync.configured, syncState, accountEmail, accountMessage, emailInput, { emailInput = it }, passwordInput, { passwordInput = it },
-                        onSignIn = { scope.launch { try { SupabaseSync.signIn(emailInput, passwordInput); accountEmail = "Signed in"; accountMessage = "Signed in successfully."; syncNow() } catch (_: Exception) { accountMessage = "Sign in could not be completed. Check your details and connection." } } },
-                        onSignUp = { scope.launch { try { SupabaseSync.signUp(emailInput, passwordInput); accountMessage = "If email confirmation is enabled, check your inbox before signing in." } catch (_: Exception) { accountMessage = "Account creation could not be completed. Check your details and connection." } } },
+                        onSignIn = { scope.launch { try { SupabaseSync.signIn(emailInput, passwordInput); accountEmail = "Signed in"; accountMessage = "Signed in successfully."; syncNow() } catch (error: Exception) { accountMessage = error.message?.takeIf(String::isNotBlank)?.let { "Sign in failed: ${it.take(180)}" } ?: "Sign in could not be completed. Check your details and connection." } } },
+                        onSignUp = { scope.launch { try { SupabaseSync.signUp(emailInput, passwordInput); if (SupabaseSync.userId() != null) { accountEmail = "Signed in"; accountMessage = "Account created and signed in."; syncNow() } else { accountMessage = "Account created. Check your email to confirm it, then sign in." } } catch (error: Exception) { accountMessage = error.message?.takeIf(String::isNotBlank)?.let { "Account creation failed: ${it.take(180)}" } ?: "Account creation could not be completed. Check your details and connection." } } },
                         onSignOut = { scope.launch { runCatching { SupabaseSync.signOut() }; accountEmail = ""; syncState = "Offline"; accountMessage = "Signed out. Your local plan remains available." } }, onSync = { scope.launch { syncNow() } })
                     "Tasks" -> TaskListScreen(visibleTasks, onEdit = { editing = it; showNew = true }, onStatus = { task, status -> scope.launch { repository.setStatus(task, status); ReminderScheduler.refresh(context); syncNow() } }, onDelete = { task -> scope.launch { repository.delete(task); syncNow() } })
                     "Check-in" -> CheckInScreen(checkIn) { priorities, intention, progress, reflection, outcome -> scope.launch { checkIns.save(java.time.LocalDate.now().toString(), intention, priorities, progress, reflection, outcome, checkIn); syncNow() } }

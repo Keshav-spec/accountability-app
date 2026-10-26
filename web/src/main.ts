@@ -8,7 +8,7 @@ import { supabase, syncState, type SyncStatus } from './supabaseSync.js';
 
 const repo = new LocalRepository();
 let state: AppState = defaultState();
-let page: 'Today' | 'Tasks' | 'Check-in' | 'Reminders' = 'Today';
+let page: 'Today' | 'Tasks' | 'Check-in' | 'Reminders' | 'Account' = 'Today';
 let editingId: string | null = null;
 let editorOpen = false;
 let webRegistration: ServiceWorkerRegistration | null = null;
@@ -52,8 +52,10 @@ async function signOut(): Promise<void> { await supabase?.auth.signOut(); accoun
 
 function render(): void {
   const app = document.querySelector<HTMLDivElement>('#app')!;
-  const tabs = ['Today', 'Tasks', 'Check-in', 'Reminders'] as const;
-  app.innerHTML = `<div class="layout"><aside class="rail"><a class="brand" href="#"><span class="brand-mark">s</span><span>steady</span></a><div class="rail-label">YOUR SPACE</div><nav>${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}"><span class="nav-dot">${tab === 'Today' ? '◷' : tab === 'Tasks' ? '✓' : tab === 'Check-in' ? '♡' : '◌'}</span>${tab}</button>`).join('')}</nav><div class="rail-note"><span class="sun">☼</span><p>One step at a time is enough.</p></div></aside><main><header><div class="eyebrow">YOUR SPACE <span>·</span> ${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</div><div class="account-strip"><span class="sync-state">${syncStatus}</span>${accountEmail ? `<span>${escapeHtml(accountEmail)}</span><button class="small-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button>` : '<button class="small-button" id="account-toggle">Account</button>'}</div><div class="mobile-nav">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}">${tab}</button>`).join('')}</div></header><section class="content">${!accountEmail && accountOpen ? accountPanel() : page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : remindersPage()}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section></main></div>`;
+  const tabs = ['Today', 'Tasks', 'Check-in', 'Reminders', 'Account'] as const;
+  const icon: Record<(typeof tabs)[number], string> = { Today: '◷', Tasks: '✓', 'Check-in': '♡', Reminders: '◌', Account: '◎' };
+  const pageContent = page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : page === 'Reminders' ? remindersPage() : accountPanel();
+  app.innerHTML = `<div class="layout"><aside class="rail"><a class="brand" href="#"><span class="brand-mark">s</span><span>steady</span></a><div class="rail-label">YOUR SPACE</div><nav>${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}"><span class="nav-dot">${icon[tab]}</span>${tab}</button>`).join('')}</nav><div class="rail-note"><span class="sun">☼</span><p>One step at a time is enough.</p></div></aside><main><header><div class="eyebrow">YOUR SPACE <span>·</span> ${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</div><div class="account-strip"><span class="sync-state">${syncStatus}</span>${accountEmail ? `<span>${escapeHtml(accountEmail)}</span><button class="small-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button>` : '<button class="small-button" id="account-toggle">Account</button>'}</div><div class="mobile-nav">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}">${tab}</button>`).join('')}</div></header><section class="content">${pageContent}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section></main></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => button.addEventListener('click', () => { page = button.dataset.page as typeof page; editingId = null; editorOpen = false; render(); }));
   app.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((button) => button.addEventListener('click', () => changeStatus(button.dataset.id!, button.dataset.status as Task['status'])));
   app.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach((button) => button.addEventListener('click', () => void deleteTask(button.dataset.delete!)));
@@ -62,7 +64,7 @@ function render(): void {
   app.querySelector<HTMLButtonElement>('#cancel-edit')?.addEventListener('click', () => { editingId = null; editorOpen = false; render(); });
   app.querySelector<HTMLFormElement>('#checkin-form')?.addEventListener('submit', saveCheckIn);
   app.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', saveReminderSettings);
-  app.querySelector<HTMLButtonElement>('#account-toggle')?.addEventListener('click', () => { accountOpen = !accountOpen; render(); });
+  app.querySelector<HTMLButtonElement>('#account-toggle')?.addEventListener('click', () => { page = 'Account'; render(); });
   app.querySelector<HTMLButtonElement>('#signout')?.addEventListener('click', () => void signOut());
   app.querySelector<HTMLButtonElement>('#sync-now')?.addEventListener('click', () => void runSync());
   app.querySelector<HTMLButtonElement>('#signin')?.addEventListener('click', () => void accountAction('signin'));
@@ -72,9 +74,11 @@ function render(): void {
   app.querySelector<HTMLButtonElement>('#disable-reminders')?.addEventListener('click', () => void disableReminders());
 }
 
-let accountOpen = false;
 function accountPanel(): string {
-  return `<div class="page-intro"><p class="eyebrow">OPTIONAL ACCOUNT</p><h1>Sync your plan</h1><p class="subhead">Your tasks stay on this device and sync when you sign in online.</p></div>${!supabase ? '<article class="check-card">Supabase is not configured. Local planning still works. Add the project URL and publishable key to web/.env.local to enable accounts.</article>' : `${syncStatus === 'needs attention' ? '<article class="check-card">Sync needs attention. Check your connection, account, and Supabase setup. Your local edits remain saved here.</article>' : ''}<form id="account-form" class="check-card"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="current-password" minlength="8" required></label><div class="form-actions"><button class="primary-button" id="signin" type="button">Sign in</button><button class="small-button" id="signup" type="button">Create account</button></div></form>`}`;
+  const intro = `<div class="page-intro"><p class="eyebrow">OPTIONAL ACCOUNT</p><h1>Account and sync</h1><p class="subhead">Your tasks stay on this device and sync when you sign in online.</p></div>`;
+  if (!supabase) return `${intro}<article class="check-card">Supabase is not configured. Local planning still works. Add the project URL and publishable key to web/.env.local to enable accounts.</article>`;
+  if (accountEmail) return `${intro}<article class="check-card"><h2>You’re signed in</h2><p>${escapeHtml(accountEmail)}</p><p>Sync status: ${escapeHtml(syncStatus)}</p><div class="form-actions"><button class="primary-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button></div></article>`;
+  return `${intro}${syncStatus === 'needs attention' ? '<article class="check-card">Sync needs attention. Check your connection, account, and Supabase setup. Your local edits remain saved here.</article>' : ''}<form id="account-form" class="check-card"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="primary-button" id="signin" type="button">Sign in</button><button class="small-button" id="signup" type="button">Create account</button></div></form>`;
 }
 
 function todayPage(): string {

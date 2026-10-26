@@ -43,6 +43,6 @@ Steady is a local-first, single-user planner for a person who wants gentle struc
 
 ## Platform/dependency choices
 
-- Android minimum API 26, compile/target API 36, AGP 8.13.2, Gradle 8.13, Kotlin 2.3.21, Compose BOM 2026.09.00, Room 2.8.5, WorkManager 2.12.0, Core KTX 1.19.1, Lifecycle Runtime KTX 2.11.0. The minimum Android API follows the planned Supabase Kotlin client’s documented minimum without desugaring.
+- Android minimum API 26, compile/target API 36, AGP 8.13.2, Gradle 8.13, Kotlin 2.3.21, Compose BOM 2025.09.00, Room 2.8.5, WorkManager 2.12.0, Core KTX 1.17.0, Lifecycle Runtime KTX 2.9.4. The minimum Android API follows the planned Supabase Kotlin client’s documented minimum without desugaring.
 - WorkManager is used because it persists deferrable work across app restarts/reboots. It is inexact: Android battery and background rules may delay a reminder.
 - Web uses Vite 7, TypeScript and IndexedDB locally, with optional Supabase Auth/Postgres sync when configured. Notification permission and persistent notification delivery depend on browser support.
