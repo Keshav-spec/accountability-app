@@ -27,7 +27,7 @@ gradle -p android testDebugUnitTest
 gradle -p android installDebug
 ```
 
-Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and select the `app` run configuration. The Android app stores tasks, check-ins, reminder preferences and delivery keys in Room. Android notifications require the notification permission on API 33 and later; the app explains this before opening the system prompt.
+Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and select the `app` run configuration. The Android app stores tasks, check-ins, reminder preferences/history, and opt-in usage selections/aggregates in Room. Android notifications require the notification permission on API 33 and later; the app explains this before opening the system prompt. See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md) for the Usage Access flow and [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md) for optional app limits and device verification.
 
 ## Manual test checklist
 
@@ -38,13 +38,15 @@ Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and sele
 5. Confirm quiet hours suppress or defer a reminder, completed/skipped tasks do not get further reminders, the daily limit is observed, and disabling reminders stops future reminders.
 6. Restart each app and confirm local tasks, check-ins and reminder settings remain. Try offline after the first web load.
 7. For configured Supabase: create/sign in to the same account on Android and Windows, create a task on Android and confirm it appears on Windows, edit it on Windows and confirm the change appears on Android. Also verify check-ins, offline edits, deletion tombstones, and RLS using a second account. See [docs/STAGE3_SUPABASE.md](docs/STAGE3_SUPABASE.md).
+8. On an Android phone, open **Usage** and read its explanation. Enable usage totals, grant/revoke Usage Access in system Settings, choose apps, set a threshold, and verify a warning without app blocking. Turn usage off and confirm saved totals are erased. See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md). Usage reporting has not been exercised on a device unless this checklist is completed.
+9. On an Android phone, open **Limits** and read the disclosure before enabling anything. Select a test app and a task rule, grant Accessibility access in Settings, then verify the overlay, task release, exception, pause, break, emergency bypass, off switch, permission revocation and recovery. See [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md). Blocking has not been exercised on a device unless this checklist is completed.
 
 ## Architecture and privacy
 
 - `android/` uses Kotlin/Jetpack Compose, a repository boundary and Room. WorkManager persists inexact one-time reminder work across app/process restarts and device reboots.
 - `web/` uses TypeScript/Vite, IndexedDB for local data, and a service worker for the PWA shell and opt-in notifications.
 - Task/check-in fields are documented in [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md). Android runs reminder logic on-device; web uses only browser notification APIs. Notification text is not sent to a third party.
-- Sign-in and optional task/check-in sync use Supabase only when configured. The app makes no AI calls and performs no background tracking, app usage access, or app blocking.
+- Sign-in and optional task/check-in sync use Supabase only when configured. The app makes no AI calls or background user tracking. Android usage totals are optional, stay on the device, and are never synced. Optional app blocking is off by default and uses an Android Accessibility service only after separate disclosure, user consent and Settings enablement. It checks foreground package names against the user's selection, does not inspect screen content or click controls, and is an aid that can be bypassed or disabled.
 - Android’s WorkManager notifications may be delayed by battery-saving rules. Browser reminders cannot be relied on while the app page is closed or suspended by the browser.
 
 ## Accounts and sync (optional)
@@ -58,4 +60,5 @@ When configured, local changes queue on-device and sync on sign-in, launch, and 
 1. Foundation and matching app shells (complete).
 2. Local tasks, daily planning/check-ins and reminders (this stage).
 3. Supabase authentication and conflict-aware sync.
-4. Optional Android usage totals and selected-app controls, only with explicit opt-in and clear permission explanations.
+4. Optional Android usage totals and non-blocking app limits (implemented; requires device verification). See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md).
+5. Optional Android app blocking and final hardening (implemented; requires target-phone verification). See [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md).

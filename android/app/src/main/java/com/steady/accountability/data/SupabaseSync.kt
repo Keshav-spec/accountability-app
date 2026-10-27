@@ -9,6 +9,10 @@ import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import java.time.Instant
 
 object SupabaseSync {
@@ -21,9 +25,26 @@ object SupabaseSync {
         }
     }
     suspend fun signIn(email: String, password: String) = client.auth.signInWith(Email) { this.email = email; this.password = password }
-    suspend fun signUp(email: String, password: String) = client.auth.signUpWith(Email) { this.email = email; this.password = password }
+    suspend fun signUp(email: String, password: String, displayName: String) = client.auth.signUpWith(Email) {
+        this.email = email
+        this.password = password
+        data = buildJsonObject { put("display_name", displayName) }
+    }
+    suspend fun profileName(): String? {
+        val id = userId() ?: return null
+        val profile = client.from("user_profiles").select { filter { eq("user_id", id) } }.decodeList<RemoteUserProfile>().firstOrNull()?.displayName
+        return profile?.takeIf(String::isNotBlank)
+            ?: client.auth.currentUserOrNull()?.userMetadata?.get("display_name")?.jsonPrimitive?.contentOrNull?.takeIf(String::isNotBlank)
+    }
+    suspend fun saveProfileName(displayName: String) {
+        val id = userId() ?: error("Sign in to save your account name.")
+        client.auth.updateUser { data { put("display_name", displayName) } }
+        client.from("user_profiles").upsert(RemoteUserProfile(id, displayName)) { onConflict = "user_id" }
+    }
+    suspend fun updatePassword(password: String) { client.auth.updateUser { this.password = password } }
     suspend fun signOut() = client.auth.signOut()
     fun userId(): String? = client.auth.currentUserOrNull()?.id
+    fun currentEmail(): String? = client.auth.currentUserOrNull()?.email
 
     suspend fun sync(tasks: TaskDao, checkIns: CheckInDao, saveOwner: (String) -> Unit, currentOwner: String?): String {
         val userId = userId() ?: return "Sign in to sync"
@@ -54,6 +75,12 @@ object SupabaseSync {
         return "Synced"
     }
 }
+
+@Serializable
+data class RemoteUserProfile(
+    @SerialName("user_id") val userId: String,
+    @SerialName("display_name") val displayName: String,
+)
 
 object SyncRules {
     // ISO-8601 timestamps are lexically sortable. Remote wins exact ties for deterministic convergence.

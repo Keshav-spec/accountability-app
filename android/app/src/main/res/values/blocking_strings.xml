@@ -1,0 +1,4 @@
+<resources>
+    <string name="blocking_service_label">Steady app blocker</string>
+    <string name="blocking_service_description">Shows a user-controlled pause screen over apps you selected. Steady reads only the foreground app package name to check your local rule. It does not read screen content, click, or collect usage history.</string>
+</resources>
