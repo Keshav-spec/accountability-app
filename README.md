@@ -1,64 +1,111 @@
-# Steady — personal accountability
+# Steady
 
-Steady is a calm, single-user planner for Android and Windows. Stage 3 adds optional Supabase accounts and task/check-in sync on top of the local task management, daily planning/check-ins and opt-in local reminders. It works locally without Supabase credentials or a network connection.
+**A local-first personal planner for Android and the web.** Steady brings tasks, daily planning, check-ins, and gentle reminders together, with optional account sync and user-controlled Android usage tools.
 
-## Prerequisites
+<p>
+  <a href="https://github.com/Keshav-spec/accountability-app"><img src="https://img.shields.io/badge/Project-GitHub-24292f?style=for-the-badge" alt="Project on GitHub"></a>
+  <a href="docs/STAGE3_SUPABASE.md"><img src="https://img.shields.io/badge/Setup-Accounts%20%26%20Sync-3f6b58?style=for-the-badge" alt="Accounts and sync setup"></a>
+  <a href="docs/STAGE4_ANDROID_USAGE.md"><img src="https://img.shields.io/badge/Guide-Usage%20Dashboard-789b83?style=for-the-badge" alt="Android usage guide"></a>
+  <a href="docs/STAGE5_ANDROID_BLOCKING.md"><img src="https://img.shields.io/badge/Guide-App%20Limits-244237?style=for-the-badge" alt="Android app limits guide"></a>
+</p>
 
-- Android Studio, JDK 17, Android SDK Platform 36, and Gradle 8.13 (AGP 8.13.2, Kotlin 2.3.21).
-- Node.js 20 or newer and npm (web app uses Vite 7).
-- Supabase is optional. Without it, the apps continue to work from Room/IndexedDB.
+## Overview
 
-## Run the web app
+Steady supports a calm daily routine across an Android app and a browser-based web app. Both clients work offline and store data locally. Supabase is optional and adds sign-in plus synchronization for tasks and daily check-ins.
 
-```sh
+### Features
+
+- Create, edit, complete, skip, and reschedule tasks.
+- Plan up to three daily priorities, record progress, and save an evening reflection.
+- Configure local reminders, quiet hours, snoozes, and daily limits.
+- On Android, optionally view selected apps' daily usage totals and set non-blocking warning thresholds.
+- On Android, optionally enable an app pause overlay for chosen apps, with task-based or break-time rules and clear bypass controls.
+- Sign in and synchronize tasks and check-ins across devices when Supabase is configured.
+
+## Project status
+
+| Component | Status | Notes |
+| --- | --- | --- |
+| Android app | Implemented | Kotlin, Jetpack Compose, Room, WorkManager; Android API 26+ |
+| Web app | Implemented | TypeScript, Vite, IndexedDB, installable PWA shell |
+| Local-first storage | Implemented | Works without a network connection or Supabase credentials |
+| Supabase sign-in and sync | Implemented | Syncs tasks and daily check-ins; real-project two-device validation is a separate manual step |
+| Android usage totals | Implemented | Optional special Usage Access; device results may be delayed or approximate |
+| Android app blocking | Implemented | Optional Accessibility service; requires real-device verification and can be bypassed |
+
+## Quick start
+
+### Web app
+
+**Requirements:** Node.js 20 or later and npm.
+
+```powershell
 cd web
 npm install
 npm run dev
 ```
 
-Open the local URL printed by Vite. `npm test` runs the model and reminder-rule tests. `npm run build` makes a production PWA bundle; use `npm run preview` to preview it. Service workers and browser notifications require HTTPS or localhost. Browser reminders run while the app page is open; support varies by browser and OS.
+Open the local address printed by Vite. Common commands:
 
-## Run Android
+```powershell
+npm test       # Run web logic tests
+npm run build  # Type-check and build the production PWA
+npm run preview
+```
 
-Set `ANDROID_HOME` (or `sdk.dir` in ignored `android/local.properties`) to your Android SDK. With an API 26+ emulator/device connected:
+Browser notifications and service workers require HTTPS or localhost. Notification delivery depends on browser and operating-system support; reminders may not run while the page is closed or suspended.
 
-```sh
+### Android app
+
+**Requirements:** Android Studio, JDK 17, Android SDK Platform 36, and a connected Android API 26+ device or emulator. The project uses Gradle 8.13, Android Gradle Plugin 8.13.2, and Kotlin 2.3.21.
+
+Open the `android/` directory in Android Studio, allow the Gradle sync to finish, select the `app` run configuration, and run it on a device or emulator. Set the Android SDK location in `android/local.properties` as `sdk.dir`, or configure `ANDROID_HOME`.
+
+From a terminal with Gradle 8.13 available:
+
+```powershell
 gradle -p android testDebugUnitTest
+gradle -p android assembleDebug
 gradle -p android installDebug
 ```
 
-Alternatively, open `android/` in Android Studio, configure Gradle 8.13 and select the `app` run configuration. The Android app stores tasks, check-ins, reminder preferences/history, and opt-in usage selections/aggregates in Room. Android notifications require the notification permission on API 33 and later; the app explains this before opening the system prompt. See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md) for the Usage Access flow and [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md) for optional app limits and device verification.
+The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. Android notifications require notification permission on Android 13 and later. Steady explains the request before opening the system prompt.
 
-## Manual test checklist
+## Optional Supabase setup
 
-1. Create a task with a title, notes, date and optional target time. Try a blank title, edit it and move it to a future date.
-2. Complete a task, undo it, skip it, and confirm today’s done/skipped list and upcoming list update.
-3. Add up to three morning priorities and an intention; save a progress check-in and evening reflection with Complete, Mixed or Rest. Reopen the app and confirm they remain.
-4. Configure reminder times, quiet hours and a daily limit. Enable reminders; confirm Android’s permission prompt (API 33+) or the browser’s explicit permission prompt. On Android, wait for a reminder and try Snooze and Stop today. In the browser, keep the app page open until a test reminder time and try the notification actions.
-5. Confirm quiet hours suppress or defer a reminder, completed/skipped tasks do not get further reminders, the daily limit is observed, and disabling reminders stops future reminders.
-6. Restart each app and confirm local tasks, check-ins and reminder settings remain. Try offline after the first web load.
-7. For configured Supabase: create/sign in to the same account on Android and Windows, create a task on Android and confirm it appears on Windows, edit it on Windows and confirm the change appears on Android. Also verify check-ins, offline edits, deletion tombstones, and RLS using a second account. See [docs/STAGE3_SUPABASE.md](docs/STAGE3_SUPABASE.md).
-8. On an Android phone, open **Usage** and read its explanation. Enable usage totals, grant/revoke Usage Access in system Settings, choose apps, set a threshold, and verify a warning without app blocking. Turn usage off and confirm saved totals are erased. See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md). Usage reporting has not been exercised on a device unless this checklist is completed.
-9. On an Android phone, open **Limits** and read the disclosure before enabling anything. Select a test app and a task rule, grant Accessibility access in Settings, then verify the overlay, task release, exception, pause, break, emergency bypass, off switch, permission revocation and recovery. See [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md). Blocking has not been exercised on a device unless this checklist is completed.
+Supabase is only needed for accounts and cross-device task/check-in sync. Local task, check-in, reminder, and usage features remain available without it.
 
-## Architecture and privacy
+1. Create a Supabase project and apply [`supabase/migrations/20261025000000_stage3_sync.sql`](supabase/migrations/20261025000000_stage3_sync.sql).
+2. Follow [the Supabase setup guide](docs/STAGE3_SUPABASE.md) to configure email authentication, row-level security, redirect URLs, and local client settings.
+3. Copy `web/.env.example` to the ignored `web/.env.local`; set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
+4. Copy `android/local.properties.example` to the ignored `android/local.properties`; keep the correct `sdk.dir` and add `supabase.url` and `supabase.publishableKey`.
+5. Restart the web development server and rebuild Android after changing configuration.
 
-- `android/` uses Kotlin/Jetpack Compose, a repository boundary and Room. WorkManager persists inexact one-time reminder work across app/process restarts and device reboots.
-- `web/` uses TypeScript/Vite, IndexedDB for local data, and a service worker for the PWA shell and opt-in notifications.
-- Task/check-in fields are documented in [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md). Android runs reminder logic on-device; web uses only browser notification APIs. Notification text is not sent to a third party.
-- Sign-in and optional task/check-in sync use Supabase only when configured. The app makes no AI calls or background user tracking. Android usage totals are optional, stay on the device, and are never synced. Optional app blocking is off by default and uses an Android Accessibility service only after separate disclosure, user consent and Settings enablement. It checks foreground package names against the user's selection, does not inspect screen content or click controls, and is an aid that can be bypassed or disabled.
-- Android’s WorkManager notifications may be delayed by battery-saving rules. Browser reminders cannot be relied on while the app page is closed or suspended by the browser.
+Use only the Supabase project URL and publishable (or legacy anon) key in client apps. Never place a service-role key in either app. Review the two-device and row-level-security checklist before relying on sync; automated tests do not validate a live Supabase project.
 
-## Accounts and sync (optional)
+## Privacy and platform behavior
 
-Create a Supabase project and apply [`supabase/migrations/20261025000000_stage3_sync.sql`](supabase/migrations/20261025000000_stage3_sync.sql). Follow [docs/STAGE3_SUPABASE.md](docs/STAGE3_SUPABASE.md) to configure email/password auth, per-user RLS, web/Android local configuration, redirect URLs, and the two-device manual checklist. Web configuration goes in ignored `web/.env.local`; Android configuration goes in ignored `android/local.properties` (copy `android/local.properties.example`). Use only the project URL and publishable key. Never commit a service-role key.
+- Android stores tasks, check-ins, reminder settings/history, and usage selections locally in Room. The web app stores local data in IndexedDB.
+- Supabase sync is optional and currently covers tasks and daily check-ins. Reminder delivery settings and Android usage totals remain local.
+- Usage totals are off until enabled. Android requires the user to grant Usage Access in system Settings. Totals can be delayed or approximate, and turning usage tracking off erases stored aggregates.
+- App blocking is separately opt-in and off by default. After the user reads a disclosure and enables Android Accessibility access, Steady checks the foreground package name against the selected apps. It does not inspect screen text or click controls. Blocking is an accountability aid, not a security boundary; it can be paused, bypassed, disabled, or uninstalled.
+- No AI calls are made. Notification content and Android usage data are not sent to third parties. Steady does not perform background user tracking.
+- Android WorkManager reminders are inexact and may be delayed by battery or background restrictions. Browser notification behavior varies by browser and platform.
 
-When configured, local changes queue on-device and sync on sign-in, launch, and reconnect. The latest `updated_at` wins; remote wins timestamp ties. Deletions are tombstones. Failed sync leaves local data intact and shows the sync state. Current sync supports tasks and daily check-ins; reminder schedules remain local. Cross-device sync has not been verified against a real Supabase project unless the two-device checklist has been run.
+## Verification guides
 
-## Roadmap
+- [Stage 3: Supabase setup and sync checklist](docs/STAGE3_SUPABASE.md)
+- [Stage 4: Android usage access and device checklist](docs/STAGE4_ANDROID_USAGE.md)
+- [Stage 5: Android app blocking, recovery, and device checklist](docs/STAGE5_ANDROID_BLOCKING.md)
+- [Product requirements and privacy boundaries](docs/PRODUCT_REQUIREMENTS.md)
 
-1. Foundation and matching app shells (complete).
-2. Local tasks, daily planning/check-ins and reminders (this stage).
-3. Supabase authentication and conflict-aware sync.
-4. Optional Android usage totals and non-blocking app limits (implemented; requires device verification). See [docs/STAGE4_ANDROID_USAGE.md](docs/STAGE4_ANDROID_USAGE.md).
-5. Optional Android app blocking and final hardening (implemented; requires target-phone verification). See [docs/STAGE5_ANDROID_BLOCKING.md](docs/STAGE5_ANDROID_BLOCKING.md).
+Before a release, exercise the relevant manual checklist on the intended devices. This repository does not claim that Supabase sync has been validated against a live project or that Android usage reporting and blocking have been verified on a particular phone.
+
+## Repository layout
+
+```text
+android/    Android application and Room database
+web/        TypeScript web application and PWA
+supabase/   Database migrations and row-level-security schema
+docs/       Setup, product, privacy, and device verification guides
+```
