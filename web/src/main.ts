@@ -1,14 +1,18 @@
 import './style.css';
 import './stage2.css';
 import './stage3.css';
+import './stage4.css';
 import { today, setTaskStatus, validateTaskTitle, type Task, type DailyCheckIn } from './models.js';
 import { mayDeliver, nextReminder, recordDelivery } from './reminders.js';
 import { defaultState, LocalRepository, type AppState } from './localRepository';
-import { supabase, syncState, type SyncStatus } from './supabaseSync.js';
+import { getLastSyncAt, loadProfileName, requestGoogleSignIn, saveProfileName, supabase, syncState, type SyncStatus } from './supabaseSync.js';
 
 const repo = new LocalRepository();
 let state: AppState = defaultState();
-let page: 'Today' | 'Tasks' | 'Check-in' | 'Reminders' | 'Account' = 'Today';
+let activeScope = 'guest';
+let loadingScope: string | null = null;
+let scopeLoadPromise: Promise<void> | null = null;
+let page: 'Today' | 'Tasks' | 'Check-in' | 'Reminders' | 'Usage' | 'Account' = 'Today';
 let editingId: string | null = null;
 let editorOpen = false;
 let webRegistration: ServiceWorkerRegistration | null = null;
@@ -16,22 +20,44 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let statusMessage = '';
 let syncStatus: SyncStatus = navigator.onLine ? 'needs attention' : 'offline';
 let accountEmail = '';
+let displayName = '';
+let creatingAccount = false;
 let syncActive = false;
 let syncQueued = false;
+let recoveryMode = false;
+let recentlyDeleted: Task | null = null;
+let recentlyChanged: Task | null = null;
 
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const checkInForToday = (): DailyCheckIn => state.checkIns[today()] ?? { date: today(), morningPlan: null, priorities: [], progressNote: null, eveningReflection: null, dayOutcome: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 const pendingToday = () => state.tasks.some((task) => !task.deletedAt && task.scheduledDate === today() && task.status === 'planned');
 
-async function persist(): Promise<void> { await repo.save(state); scheduleReminder(); if (supabase && accountEmail) void runSync(); }
+async function persist(): Promise<void> { await repo.save(state, activeScope); scheduleReminder(); if (supabase && accountEmail) void runSync(); }
+
+async function switchLocalScope(userId: string | null): Promise<void> {
+  const nextScope = userId || 'guest';
+  if (nextScope === activeScope) { if (loadingScope === nextScope) await scopeLoadPromise; return; }
+  activeScope = nextScope;
+  state = defaultState(nextScope === 'guest');
+  render();
+  loadingScope = nextScope;
+  const requestedScope = nextScope;
+  scopeLoadPromise = repo.load(requestedScope).then((loaded) => {
+    if (activeScope === requestedScope) { state = loaded; render(); }
+  });
+  try { await scopeLoadPromise; }
+  finally { if (loadingScope === requestedScope) { loadingScope = null; scopeLoadPromise = null; } }
+}
 
 async function runSync(): Promise<void> {
   if (!supabase || !accountEmail) return;
   if (syncActive) { syncQueued = true; return; }
   syncActive = true;
   do {
+    const syncScope = activeScope;
+    const syncSnapshot = state;
     syncQueued = false; syncStatus = 'syncing'; render();
-    try { syncStatus = await syncState(state, (next) => repo.save(next)); }
+    try { syncStatus = await syncState(syncSnapshot, (next) => repo.save(next, syncScope)); }
     catch { syncStatus = navigator.onLine ? 'needs attention' : 'offline'; }
   } while (syncQueued && navigator.onLine);
   syncActive = false; render();
@@ -41,21 +67,73 @@ async function accountAction(action: 'signup' | 'signin'): Promise<void> {
   if (!supabase) return;
   const form = document.querySelector<HTMLFormElement>('#account-form'); if (!form) return;
   const data = new FormData(form); const email = String(data.get('email') ?? '').trim(); const password = String(data.get('password') ?? '');
-  const result = action === 'signup' ? await supabase.auth.signUp({ email, password }) : await supabase.auth.signInWithPassword({ email, password });
+  const name = String(data.get('displayName') ?? '').trim();
+  if (action === 'signup' && (!name || name.length > 80)) { statusMessage = 'Enter a name between 1 and 80 characters.'; render(); return; }
+  const result = action === 'signup'
+    ? await supabase.auth.signUp({ email, password, options: { data: { display_name: name } } })
+    : await supabase.auth.signInWithPassword({ email, password });
   if (result.error) { statusMessage = result.error.message; render(); return; }
+  if (!result.data.session) {
+    displayName = name;
+    statusMessage = 'Check your email to confirm your account, then sign in. Your name is saved with your account.';
+    render();
+    return;
+  }
   accountEmail = result.data.user?.email ?? email;
-  statusMessage = result.data.session ? 'Signed in. Syncing your local plan.' : 'Check your email to confirm your account, then sign in.';
+  await switchLocalScope(result.data.user?.id ?? null);
+  {
+    try {
+      displayName = action === 'signup' ? name : (await loadProfileName()) ?? accountEmail.split('@')[0].replace(/[._-]/g, ' ');
+      if (action === 'signup') await saveProfileName(name);
+      statusMessage = action === 'signup' ? 'Account created. Your profile name is saved.' : 'Signed in. Syncing your local plan.';
+      localStorage.setItem(`steady-profile-name:${accountEmail.toLowerCase()}`, displayName);
+    } catch {
+      statusMessage = 'Signed in. Your local plan can sync, but the profile name could not be loaded.';
+    }
+  }
   render(); if (result.data.session) await runSync();
 }
 
-async function signOut(): Promise<void> { await supabase?.auth.signOut(); accountEmail = ''; syncStatus = navigator.onLine ? 'offline' : 'offline'; render(); }
+async function requestPasswordReset(): Promise<void> {
+  if (!supabase) return;
+  const email = String(new FormData(document.querySelector<HTMLFormElement>('#account-form')!).get('email') ?? '').trim();
+  if (!email) { statusMessage = 'Enter your email address first.'; render(); return; }
+  const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${location.origin}/?recovery=1` });
+  statusMessage = error ? 'Password reset could not be requested. Check your connection and try again.' : 'If an account uses that email, a password reset link is on its way.';
+  render();
+}
+
+async function saveRecoveredPassword(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement; const data = new FormData(form);
+  const password = String(data.get('password') ?? '');
+  if (password.length < 8 || password !== String(data.get('confirm') ?? '')) { statusMessage = 'Use at least 8 characters and make both passwords match.'; render(); return; }
+  const { error } = await supabase!.auth.updateUser({ password });
+  if (error) { statusMessage = 'Password could not be updated. Reopen the latest reset link and try again.'; render(); return; }
+  recoveryMode = false; history.replaceState({}, '', location.pathname);
+  statusMessage = 'Your password was updated. You can sign in with it now.'; await signOut();
+}
+
+async function signOut(): Promise<void> { await supabase?.auth.signOut(); accountEmail = ''; displayName = ''; await switchLocalScope(null); syncStatus = 'offline'; render(); }
+const profileNameKey = (email: string) => `steady-profile-name:${email.toLowerCase()}`;
+const pendingProfileNameKey = (email: string) => `steady-profile-name-pending:${email.toLowerCase()}`;
+
+async function syncPendingProfileName(): Promise<void> {
+  if (!accountEmail || !navigator.onLine) return;
+  const key = pendingProfileNameKey(accountEmail);
+  const pending = localStorage.getItem(key);
+  if (!pending) return;
+  try { await saveProfileName(pending); localStorage.removeItem(key); }
+  catch { /* Keep the local edit queued for a later connection. */ }
+}
 
 function render(): void {
   const app = document.querySelector<HTMLDivElement>('#app')!;
-  const tabs = ['Today', 'Tasks', 'Check-in', 'Reminders', 'Account'] as const;
-  const icon: Record<(typeof tabs)[number], string> = { Today: '◷', Tasks: '✓', 'Check-in': '♡', Reminders: '◌', Account: '◎' };
-  const pageContent = page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : page === 'Reminders' ? remindersPage() : accountPanel();
-  app.innerHTML = `<div class="layout"><aside class="rail"><a class="brand" href="#"><span class="brand-mark">s</span><span>steady</span></a><div class="rail-label">YOUR SPACE</div><nav>${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}"><span class="nav-dot">${icon[tab]}</span>${tab}</button>`).join('')}</nav><div class="rail-note"><span class="sun">☼</span><p>One step at a time is enough.</p></div></aside><main><header><div class="eyebrow">YOUR SPACE <span>·</span> ${new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).toUpperCase()}</div><div class="account-strip"><span class="sync-state">${syncStatus}</span>${accountEmail ? `<span>${escapeHtml(accountEmail)}</span><button class="small-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button>` : '<button class="small-button" id="account-toggle">Account</button>'}</div><div class="mobile-nav">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}">${tab}</button>`).join('')}</div></header><section class="content">${pageContent}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section></main></div>`;
+  const tabs = ['Today', 'Tasks', 'Check-in', 'Reminders', 'Usage'] as const;
+  const icon: Record<(typeof tabs)[number], string> = { Today: '◷', Tasks: '✓', 'Check-in': '♡', Reminders: '◌', Usage: '◉' };
+  const pageContent = page === 'Today' ? todayPage() : page === 'Tasks' ? tasksPage() : page === 'Check-in' ? checkInPage() : page === 'Reminders' ? remindersPage() : page === 'Usage' ? usagePage() : accountPanel();
+  const dateLabel = new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  app.innerHTML = `<div class="layout"><main><header class="app-header"><a class="brand" href="#" aria-label="Steady home"><img class="brand-mark" src="/steady-icon.png" alt=""><span class="brand-copy"><strong>STEADY</strong><small>${page === 'Account' ? 'Account & sync' : page}</small></span></a><div class="header-context"><span class="eyebrow">YOUR SPACE · ${escapeHtml(dateLabel.toUpperCase())}</span></div><div class="account-strip">${accountEmail ? `<span class="sync-state">${escapeHtml(syncStatus)}</span><button class="small-button" id="sync-now">Sync now</button>` : `<span class="sync-state">${navigator.onLine ? 'Local first' : 'Offline'}</span>`}<button class="profile-button" id="account-toggle" aria-label="Open account">${accountEmail ? escapeHtml((displayName || accountEmail).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'A') : '♙'}</button>${accountEmail ? '<button class="small-button subtle-button" id="signout">Sign out</button>' : ''}</div></header><section class="content">${pageContent}${statusMessage ? `<p class="status-message" role="status">${escapeHtml(statusMessage)}${recentlyDeleted || recentlyChanged ? ' <button class="small-button" id="undo-task-change">Undo</button>' : ''}</p>` : ''}<footer>Your plan can change as the day unfolds.</footer></section><nav class="bottom-nav" aria-label="Main navigation">${tabs.map((tab) => `<button class="nav-link ${page === tab ? 'active' : ''}" data-page="${tab}" ${page === tab ? 'aria-current="page"' : ''}><span class="nav-dot" aria-hidden="true">${icon[tab]}</span><span>${tab}</span></button>`).join('')}</nav></main></div>`;
   app.querySelectorAll<HTMLButtonElement>('[data-page]').forEach((button) => button.addEventListener('click', () => { page = button.dataset.page as typeof page; editingId = null; editorOpen = false; render(); }));
   app.querySelectorAll<HTMLButtonElement>('[data-status]').forEach((button) => button.addEventListener('click', () => changeStatus(button.dataset.id!, button.dataset.status as Task['status'])));
   app.querySelectorAll<HTMLButtonElement>('[data-delete]').forEach((button) => button.addEventListener('click', () => void deleteTask(button.dataset.delete!)));
@@ -64,21 +142,52 @@ function render(): void {
   app.querySelector<HTMLButtonElement>('#cancel-edit')?.addEventListener('click', () => { editingId = null; editorOpen = false; render(); });
   app.querySelector<HTMLFormElement>('#checkin-form')?.addEventListener('submit', saveCheckIn);
   app.querySelector<HTMLFormElement>('#reminder-form')?.addEventListener('submit', saveReminderSettings);
-  app.querySelector<HTMLButtonElement>('#account-toggle')?.addEventListener('click', () => { page = 'Account'; render(); });
+  app.querySelector<HTMLButtonElement>('#account-toggle')?.addEventListener('click', () => { page = page === 'Account' ? 'Today' : 'Account'; render(); });
   app.querySelector<HTMLButtonElement>('#signout')?.addEventListener('click', () => void signOut());
+  app.querySelector<HTMLButtonElement>('#signout-account')?.addEventListener('click', () => void signOut());
   app.querySelector<HTMLButtonElement>('#sync-now')?.addEventListener('click', () => void runSync());
+  app.querySelector<HTMLButtonElement>('#undo-task-change')?.addEventListener('click', () => void undoTaskChange());
+  app.querySelector<HTMLButtonElement>('#account-sync-now')?.addEventListener('click', () => void runSync());
   app.querySelector<HTMLButtonElement>('#signin')?.addEventListener('click', () => void accountAction('signin'));
   app.querySelector<HTMLButtonElement>('#signup')?.addEventListener('click', () => void accountAction('signup'));
+  app.querySelector<HTMLButtonElement>('#google-signin')?.addEventListener('click', () => void requestGoogleSignIn().catch(() => { statusMessage = 'Google sign-in could not start. Check that Google is enabled in Supabase Auth.'; render(); }));
+  app.querySelector<HTMLButtonElement>('#link-google')?.addEventListener('click', () => void supabase?.auth.linkIdentity({ provider: 'google', options: { redirectTo: location.origin } }).then(({ error }) => { statusMessage = error ? 'Google could not be linked. Check Supabase Auth identity-linking settings.' : 'Continue with Google to link it to this account.'; render(); }));
+  app.querySelector<HTMLButtonElement>('#forgot-password')?.addEventListener('click', () => void requestPasswordReset());
+  app.querySelector<HTMLFormElement>('#recovery-form')?.addEventListener('submit', saveRecoveredPassword);
+  app.querySelector<HTMLButtonElement>('#toggle-account-mode')?.addEventListener('click', () => { creatingAccount = !creatingAccount; statusMessage = ''; render(); });
   app.querySelector<HTMLButtonElement>('#enable-browser-reminders')?.addEventListener('click', enableBrowserReminders);
   app.querySelector<HTMLButtonElement>('#stop-today')?.addEventListener('click', stopRemindersToday);
   app.querySelector<HTMLButtonElement>('#disable-reminders')?.addEventListener('click', () => void disableReminders());
+  app.querySelector<HTMLFormElement>('#profile-form')?.addEventListener('submit', saveName);
+}
+
+async function saveName(event: SubmitEvent): Promise<void> {
+  event.preventDefault();
+  const form = event.currentTarget as HTMLFormElement;
+  const name = String(new FormData(form).get('displayName') ?? '').trim();
+  if (!name || name.length > 80) { statusMessage = 'Enter a name between 1 and 80 characters.'; render(); return; }
+  displayName = name;
+  if (accountEmail) {
+    localStorage.setItem(profileNameKey(accountEmail), name);
+    localStorage.setItem(pendingProfileNameKey(accountEmail), name);
+    await syncPendingProfileName();
+  }
+  statusMessage = accountEmail && localStorage.getItem(pendingProfileNameKey(accountEmail))
+    ? 'Your name is saved on this device and will sync when you are online.'
+    : 'Your profile name was updated.';
+  render();
 }
 
 function accountPanel(): string {
-  const intro = `<div class="page-intro"><p class="eyebrow">OPTIONAL ACCOUNT</p><h1>Account and sync</h1><p class="subhead">Your tasks stay on this device and sync when you sign in online.</p></div>`;
-  if (!supabase) return `${intro}<article class="check-card">Supabase is not configured. Local planning still works. Add the project URL and publishable key to web/.env.local to enable accounts.</article>`;
-  if (accountEmail) return `${intro}<article class="check-card"><h2>You’re signed in</h2><p>${escapeHtml(accountEmail)}</p><p>Sync status: ${escapeHtml(syncStatus)}</p><div class="form-actions"><button class="primary-button" id="sync-now">Sync now</button><button class="small-button" id="signout">Sign out</button></div></article>`;
-  return `${intro}${syncStatus === 'needs attention' ? '<article class="check-card">Sync needs attention. Check your connection, account, and Supabase setup. Your local edits remain saved here.</article>' : ''}<form id="account-form" class="check-card"><label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="new-password" minlength="8" required></label><div class="form-actions"><button class="primary-button" id="signin" type="button">Sign in</button><button class="small-button" id="signup" type="button">Create account</button></div></form>`;
+  const intro = `<div class="page-intro"><p class="eyebrow">YOUR SPACE · PRIVATE SYNC</p><h1>Account & sync</h1><p class="subhead">Your plan stays on this device and syncs when you sign in online.</p></div>`;
+  if (!supabase) return `${intro}<article class="check-card"><h2>Local-first planning</h2><p>Supabase is not configured. Your local planner remains available. Add the project URL and publishable key to <code>web/.env.local</code> to enable accounts and sync.</p></article>`;
+  if (recoveryMode) return `${intro}<form id="recovery-form" class="check-card account-form"><h2>Choose a new password</h2><label>New password<input name="password" type="password" minlength="8" autocomplete="new-password" required></label><label>Confirm password<input name="confirm" type="password" minlength="8" autocomplete="new-password" required></label><button class="primary-button" type="submit">Save password</button></form>`;
+  if (accountEmail) return `${intro}<article class="check-card profile-card"><div class="profile-summary"><span class="profile-avatar">${escapeHtml((displayName || accountEmail).trim().split(/\s+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? '').join('') || 'S')}</span><div><h2>${escapeHtml(displayName || 'Steady member')}</h2><p>${escapeHtml(accountEmail)}</p></div></div><p>Your tasks and check-ins are stored locally first and sync when a connection is available.</p><form id="profile-form"><label>Your name<input name="displayName" maxlength="80" required value="${escapeHtml(displayName)}" autocomplete="name"></label><div class="form-actions"><button class="primary-button" type="submit">Save name</button><button class="small-button" id="account-sync-now" type="button">Sync now</button><button class="small-button subtle-button" id="signout-account" type="button">Sign out</button></div></form><button class="small-button" id="link-google" type="button">Link Google sign-in</button><div class="account-sync-card"><span class="sync-state">${escapeHtml(syncStatus)}</span><p>${syncStatus === 'synced' ? 'Your local plan is up to date.' : 'Your local work remains available on this device.'}</p><p>Last successful sync: ${getLastSyncAt() ? escapeHtml(new Date(getLastSyncAt()!).toLocaleString()) : 'Not yet synced on this browser'}</p></div></article>`;
+  return `${intro}${syncStatus === 'needs attention' ? '<article class="check-card">Sync needs attention. Check your connection, account sign-in, and Supabase setup. Your local edits remain saved here.</article>' : ''}<form id="account-form" class="check-card account-form"><h2>${creatingAccount ? 'Create your Steady account' : 'Welcome back'}</h2><p>${creatingAccount ? 'Choose the name you would like to see in Steady.' : 'Sign in to sync your tasks and check-ins across devices.'}</p>${creatingAccount ? '<label>Your name<input name="displayName" type="text" maxlength="80" autocomplete="name" required></label>' : ''}<label>Email<input name="email" type="email" autocomplete="email" required></label><label>Password<input name="password" type="password" autocomplete="${creatingAccount ? 'new-password' : 'current-password'}" minlength="8" required></label><div class="form-actions"><button class="primary-button" id="${creatingAccount ? 'signup' : 'signin'}" type="button">${creatingAccount ? 'Create account' : 'Sign in'}</button>${!creatingAccount ? '<button class="small-button" id="forgot-password" type="button">Forgot password?</button>' : ''}<button class="small-button" id="toggle-account-mode" type="button">${creatingAccount ? 'Already have an account? Sign in' : 'New to Steady? Create an account'}</button></div>${!creatingAccount ? '<button class="small-button" id="google-signin" type="button">Continue with Google</button>' : ''}</form>`;
+}
+
+function usagePage(): string {
+  return `<div class="page-intro"><p class="eyebrow">YOUR SPACE · DIGITAL BOUNDARIES</p><h1>Mindful limits & pauses</h1><p class="subhead">A gentle pause for the apps you choose. Your local plan remains available wherever you use Steady.</p></div><article class="check-card platform-card"><div class="platform-heading"><span class="platform-icon">◉</span><div><h2>Device-first usage totals</h2><p>Available in Steady for Android</p></div><span class="platform-badge">ANDROID</span></div><p>Android can show daily totals for apps you select after you grant Usage Access in system Settings. Totals stay on that device and may be delayed or approximate.</p><p>This browser app cannot read which apps are running on your device. Usage totals and their thresholds are not collected or synced here.</p></article><article class="check-card platform-card"><div class="platform-heading"><span class="platform-icon">◌</span><div><h2>App blocking & gentle pauses</h2><p>Optional Android feature · off by default</p></div><span class="platform-badge">ANDROID</span></div><p>On Android, you can choose apps and a task or break-time rule, then grant Accessibility access after reading the disclosure. Steady checks only the foreground app name to show a bypassable pause screen.</p><p>Blocking is an accountability aid, not a security boundary. It can be paused, bypassed, disabled, or uninstalled.</p></article><article class="check-card local-boundary"><h2>Works across your devices</h2><p>Tasks, daily planning, check-ins, and reminders remain available in this web app. Usage totals and app pause settings are stored locally on Android and are not synced.</p><button class="primary-button" type="button" data-page="Today">Return to today</button></article>`;
 }
 
 function todayPage(): string {
@@ -130,11 +239,12 @@ async function saveTask(event: SubmitEvent): Promise<void> {
   if (time && !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) { form.querySelector('#task-error')!.textContent = 'Use a 24-hour target time.'; return; }
   const old = state.tasks.find((task) => task.id === editingId); const stamp = new Date().toISOString();
   const task: Task = { id: old?.id ?? crypto.randomUUID(), title: title.trim(), notes: String(data.get('notes') ?? '').trim() || null, scheduledDate: date, targetTime: time || null, status: old?.status ?? 'planned', createdAt: old?.createdAt ?? stamp, updatedAt: stamp, syncPending: true, deletedAt: null };
-  if (old) state.tasks = state.tasks.map((item) => item.id === old.id ? task : item); else state.tasks.push(task);
+  if (old) { recentlyChanged = old; recentlyDeleted = null; state.tasks = state.tasks.map((item) => item.id === old.id ? task : item); } else state.tasks.push(task);
   editingId = null; editorOpen = false; statusMessage = 'Task saved on this device.'; await persist(); render();
 }
 
 async function changeStatus(id: string, status: Task['status']): Promise<void> {
+  recentlyChanged = state.tasks.find((task) => task.id === id) ?? null; recentlyDeleted = null;
   state.tasks = state.tasks.map((task) => task.id === id ? { ...setTaskStatus(task, status), syncPending: true } : task);
   statusMessage = status === 'completed' ? 'Marked complete. You can undo this any time.' : status === 'skipped' ? 'Skipped for now. That’s okay.' : 'Task moved back to your plan.';
   await persist(); render();
@@ -142,8 +252,17 @@ async function changeStatus(id: string, status: Task['status']): Promise<void> {
 
 async function deleteTask(id: string): Promise<void> {
   const stamp = new Date().toISOString();
+  recentlyDeleted = state.tasks.find((task) => task.id === id) ?? null;
+  recentlyChanged = null;
   state.tasks = state.tasks.map((task) => task.id === id ? { ...task, deletedAt: stamp, updatedAt: stamp, syncPending: true } : task);
-  statusMessage = 'Task deleted. It will stay deleted across your devices.'; await persist(); render();
+  statusMessage = 'Task deleted.'; await persist(); render();
+}
+
+async function undoTaskChange(): Promise<void> {
+  const snapshot = recentlyDeleted ?? recentlyChanged;
+  if (!snapshot) return;
+  state.tasks = state.tasks.map((task) => task.id === snapshot.id ? { ...snapshot, updatedAt: new Date().toISOString(), syncPending: true } : task);
+  recentlyDeleted = null; recentlyChanged = null; statusMessage = 'Your task change was undone.'; await persist(); render();
 }
 
 async function saveCheckIn(event: SubmitEvent): Promise<void> {
@@ -207,15 +326,43 @@ async function handleReminderAction(action: string): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  state = await repo.load();
+  const initialSession = supabase ? (await supabase.auth.getSession()).data.session : null;
+  let initialUserId: string | null = initialSession?.user.id ?? null;
+  activeScope = initialUserId ?? 'guest';
+  state = await repo.load(activeScope);
   if (supabase) {
     const { data: { session } } = await supabase.auth.getSession();
+    initialUserId = session?.user.id ?? null;
     accountEmail = session?.user.email ?? '';
     syncStatus = navigator.onLine ? (accountEmail ? 'syncing' : 'offline') : 'offline';
-    if (accountEmail) void runSync();
-    supabase.auth.onAuthStateChange((_event, current) => { accountEmail = current?.user.email ?? ''; if (accountEmail) void runSync(); else render(); });
+    if (accountEmail) {
+      const emailForProfile = accountEmail;
+      const key = profileNameKey(accountEmail);
+      displayName = localStorage.getItem(key) ?? '';
+      void loadProfileName().then((name) => {
+        if (name && accountEmail.toLowerCase() === emailForProfile.toLowerCase()) {
+          displayName = name;
+          localStorage.setItem(key, name);
+          render();
+        }
+      }).catch(() => undefined);
+      void syncPendingProfileName();
+    }
+    supabase.auth.onAuthStateChange((event, current) => {
+      if (event === 'PASSWORD_RECOVERY') { recoveryMode = true; page = 'Account'; render(); return; }
+      accountEmail = current?.user.email ?? '';
+      void switchLocalScope(current?.user.id ?? null).then(() => {
+      if (accountEmail) {
+        displayName = localStorage.getItem(profileNameKey(accountEmail)) ?? '';
+        void loadProfileName().then((name) => { if (name) { displayName = name; localStorage.setItem(profileNameKey(accountEmail), name); render(); } }).catch(() => undefined);
+        void syncPendingProfileName();
+        void runSync();
+      } else { displayName = ''; render(); }
+      });
+    });
   }
-  window.addEventListener('online', () => { syncStatus = 'syncing'; void runSync(); });
+  if (accountEmail) void runSync();
+  window.addEventListener('online', () => { syncStatus = 'syncing'; void syncPendingProfileName(); void runSync(); });
   window.addEventListener('offline', () => { syncStatus = 'offline'; render(); });
   render();
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
@@ -223,6 +370,7 @@ async function start(): Promise<void> {
     navigator.serviceWorker.addEventListener('message', (event: MessageEvent) => { if (event.data?.type === 'reminder-action') void handleReminderAction(event.data.action); });
   }
   const url = new URL(location.href); const action = url.searchParams.get('reminder-action');
+  if (url.searchParams.get('recovery') === '1') { recoveryMode = true; page = 'Account'; history.replaceState({}, '', location.pathname); }
   if (action) { window.history.replaceState({}, '', location.pathname); await handleReminderAction(action); }
   window.addEventListener('focus', scheduleReminder);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) scheduleReminder(); });
@@ -230,3 +378,4 @@ async function start(): Promise<void> {
 }
 
 void start();
+

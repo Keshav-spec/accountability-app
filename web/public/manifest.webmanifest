@@ -4,7 +4,7 @@
   "description": "A little structure, with room to breathe.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#f7f5ef",
-  "theme_color": "#f7f5ef",
-  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+  "background_color": "#faf9f5",
+  "theme_color": "#faf9f5",
+  "icons": [{ "src": "/steady-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any maskable" }]
 }

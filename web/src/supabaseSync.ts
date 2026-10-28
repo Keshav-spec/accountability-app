@@ -6,6 +6,38 @@ const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
 export const supabase: SupabaseClient | null = url && key ? createClient(url, key) : null;
 export type SyncStatus = 'synced' | 'syncing' | 'offline' | 'needs attention';
+let latestSyncAt: string | null = localStorage.getItem('steady-last-sync');
+export function getLastSyncAt(): string | null { return latestSyncAt; }
+
+export async function requestGoogleSignIn(): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+  if (error) throw error;
+}
+
+export async function loadProfileName(): Promise<string | null> {
+  if (!supabase) return null;
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) return null;
+  const { data, error } = await supabase.from('user_profiles').select('display_name').eq('user_id', user.id).maybeSingle();
+  if (error) throw error;
+  const storedName = typeof data?.display_name === 'string' ? data.display_name.trim() : '';
+  const authName = typeof user.user_metadata?.display_name === 'string' ? user.user_metadata.display_name.trim() : '';
+  return storedName || authName || null;
+}
+
+export async function saveProfileName(name: string): Promise<void> {
+  if (!supabase) throw new Error('Supabase is not configured.');
+  const normalized = name.trim();
+  if (!normalized || normalized.length > 80) throw new Error('Enter a name between 1 and 80 characters.');
+  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  if (authError || !user) throw new Error('Sign in again to update your profile name.');
+  const { error } = await supabase.from('user_profiles').upsert(
+    { user_id: user.id, display_name: normalized },
+    { onConflict: 'user_id' },
+  );
+  if (error) throw error;
+}
 
 export async function syncState(state: AppState, save: (next: AppState) => Promise<void>): Promise<SyncStatus> {
   if (!supabase) return 'needs attention';
@@ -49,5 +81,7 @@ export async function syncState(state: AppState, save: (next: AppState) => Promi
     }
   }
   await save(state);
+  latestSyncAt = new Date().toISOString();
+  localStorage.setItem('steady-last-sync', latestSyncAt);
   return 'synced';
 }

@@ -1,7 +1,7 @@
-const CACHE = 'steady-shell-v3';
+const CACHE = 'steady-shell-v4';
 self.addEventListener('install', (event) => event.waitUntil((async () => {
   const cache = await caches.open(CACHE);
-  await cache.addAll(['/', '/manifest.webmanifest', '/icon.svg']);
+  await cache.addAll(['/', '/manifest.webmanifest', '/steady-icon.png']);
   await self.skipWaiting();
 })()));
 self.addEventListener('activate', (event) => event.waitUntil((async () => {
