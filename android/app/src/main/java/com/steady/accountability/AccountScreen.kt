@@ -46,6 +46,8 @@ private val AccountMuted = Color(0xFF414845)
 fun AccountScreen(
     configured: Boolean,
     syncState: String,
+    lastSync: String,
+    recoveryPending: Boolean,
     account: String,
     displayName: String,
     message: String,
@@ -56,6 +58,10 @@ fun AccountScreen(
     newName: String,
     onNewName: (String) -> Unit,
     onSignIn: () -> Unit,
+    onGoogleSignIn: () -> Unit,
+    onLinkGoogle: () -> Unit,
+    onPasswordReset: () -> Unit,
+    onRecoveryPassword: (String) -> Unit,
     onSignUp: (String) -> Unit,
     onSaveName: (String) -> Unit,
     onSignOut: () -> Unit,
@@ -74,6 +80,7 @@ fun AccountScreen(
     var showPasswordDialog by remember { mutableStateOf(false) }
     var showDevices by remember { mutableStateOf(false) }
     var showHistory by remember { mutableStateOf(false) }
+    var showRecoveryPassword by remember(recoveryPending) { mutableStateOf(recoveryPending) }
     LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
         item {
             Text("● YOUR SPACE · SANCTUARY PREFERENCES", style = MaterialTheme.typography.labelSmall, color = AccountSage, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
@@ -102,6 +109,7 @@ fun AccountScreen(
                             Column(Modifier.weight(1f).padding(start = 8.dp)) {
                                 Text(if (syncState == "Synced") "Synced & calm" else syncState, color = AccountForest, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium)
                                 Text(if (syncState == "Synced") "Your local plan is up to date" else "Your local plan stays safe on this device", color = AccountMuted, style = MaterialTheme.typography.labelSmall)
+                                if (lastSync.isNotBlank()) Text("Last successful sync · $lastSync", color = AccountMuted, style = MaterialTheme.typography.labelSmall)
                             }
                             Button(onClick = onSync, enabled = configured, shape = RoundedCornerShape(50), colors = ButtonDefaults.buttonColors(containerColor = AccountForest), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 5.dp)) { Text("↻  Sync now", style = MaterialTheme.typography.labelMedium) }
                         }
@@ -128,6 +136,10 @@ fun AccountScreen(
                     ) { Text(if (creatingAccount) "Create account" else "Sign in") }
                     TextButton(onClick = { creatingAccount = !creatingAccount }) {
                         Text(if (creatingAccount) "Already have an account? Sign in" else "New to Steady? Create an account", color = AccountForest)
+                    }
+                    if (!creatingAccount) {
+                        TextButton(onClick = onPasswordReset, enabled = configured) { Text("Forgot password?", color = AccountForest) }
+                        Button(onClick = onGoogleSignIn, enabled = configured, shape = RoundedCornerShape(50), modifier = Modifier.fillMaxWidth(), colors = ButtonDefaults.buttonColors(containerColor = AccountStone, contentColor = AccountForest)) { Text("Continue with Google") }
                     }
                 }
                 if (message.isNotBlank()) Text(message, color = AccountMuted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
@@ -172,6 +184,7 @@ fun AccountScreen(
             AccountCard {
                 Text("Security & Sanctuary", color = AccountText, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Medium)
                 ActionRow("⚿", "Update account password", "Choose a new sign-in password", "›", { showPasswordDialog = true }, enabled = account.isNotBlank() && configured)
+                ActionRow("G", "Link Google account", "Add Google as a sign-in method for this account", "›", onLinkGoogle, enabled = account.isNotBlank() && configured)
                 ActionRow("▣", "Active connected devices", "This device · other sessions are private", "›", { showDevices = true })
                 Button(onClick = onSignOut, enabled = account.isNotBlank(), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().padding(top = 8.dp), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFFE7E2), contentColor = AccountText)) { Text("⇥  Sign out of Steady") }
                 Text("Signing out keeps all local device data intact. Take all the time you need.", color = AccountMuted, style = MaterialTheme.typography.labelSmall, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
@@ -209,6 +222,22 @@ fun AccountScreen(
                 if (passwordError.isBlank()) { onPasswordUpdate(firstPassword); showPasswordDialog = false }
             }) { Text("Save password") } },
             dismissButton = { TextButton(onClick = { showPasswordDialog = false }) { Text("Cancel") } },
+        )
+    }
+    if (showRecoveryPassword) {
+        var firstPassword by remember { mutableStateOf("") }
+        var secondPassword by remember { mutableStateOf("") }
+        var error by remember { mutableStateOf("") }
+        AlertDialog(
+            onDismissRequest = { if (!recoveryPending) showRecoveryPassword = false },
+            title = { Text("Choose a new password") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(firstPassword, { firstPassword = it; error = "" }, label = { Text("New password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                OutlinedTextField(secondPassword, { secondPassword = it; error = "" }, label = { Text("Confirm password") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+                if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+            } },
+            confirmButton = { TextButton(onClick = { error = when { firstPassword.length < 8 -> "Use at least 8 characters."; firstPassword != secondPassword -> "The passwords do not match."; else -> "" }; if (error.isBlank()) { onRecoveryPassword(firstPassword); showRecoveryPassword = false } }) { Text("Save password") } },
+            dismissButton = { if (!recoveryPending) TextButton(onClick = { showRecoveryPassword = false }) { Text("Cancel") } },
         )
     }
     if (showDevices) AlertDialog(

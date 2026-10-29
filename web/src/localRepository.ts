@@ -2,20 +2,15 @@ import { today, type Task, type DailyCheckIn } from './models.js';
 
 export type ReminderSettings = {
   enabled: boolean; times: string[]; quietStart: string; quietEnd: string; dailyLimit: number; snoozeMinutes: number;
-  stoppedDate: string | null; snoozeUntil: number | null; deliveredDate: string | null; deliveredCount: number; deliveredSlots: string[];
+  stoppedDate: string | null; snoozeUntil: number | null; deliveredDate: string | null; deliveredCount: number; deliveredSlots: string[]; reminderContext: string;
 };
 export type AppState = { tasks: Task[]; checkIns: Record<string, DailyCheckIn>; reminders: ReminderSettings; syncOwnerId?: string | null };
 
-export function defaultState(includeExamples = true): AppState {
-  const stamp = new Date().toISOString();
-  const date = today();
+export function defaultState(_includeExamples = false): AppState {
   return {
-    tasks: includeExamples ? [
-      { id: 'sample-water', title: 'Drink a glass of water', notes: null, scheduledDate: date, targetTime: null, status: 'planned', createdAt: stamp, updatedAt: stamp },
-      { id: 'sample-air', title: 'Step outside for a few minutes', notes: null, scheduledDate: date, targetTime: null, status: 'planned', createdAt: stamp, updatedAt: stamp },
-    ] : [],
-    checkIns: includeExamples ? { [date]: { date, morningPlan: null, priorities: [], progressNote: null, eveningReflection: null, dayOutcome: null, createdAt: stamp, updatedAt: stamp } } : {},
-    reminders: { enabled: false, times: ['09:00', '13:00', '18:00'], quietStart: '22:00', quietEnd: '08:00', dailyLimit: 3, snoozeMinutes: 10, stoppedDate: null, snoozeUntil: null, deliveredDate: null, deliveredCount: 0, deliveredSlots: [] },
+    tasks: [],
+    checkIns: {},
+    reminders: { enabled: false, times: ['09:00', '13:00', '18:00'], quietStart: '22:00', quietEnd: '08:00', dailyLimit: 3, snoozeMinutes: 10, stoppedDate: null, snoozeUntil: null, deliveredDate: null, deliveredCount: 0, deliveredSlots: [], reminderContext: 'One small step is enough.' },
   };
 }
 

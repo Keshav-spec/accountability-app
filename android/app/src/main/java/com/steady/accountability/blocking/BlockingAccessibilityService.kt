@@ -19,6 +19,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import com.steady.accountability.data.DatabaseProvider
+import com.steady.accountability.data.LOCAL_OWNER_ID
 import com.steady.accountability.data.TaskEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -91,7 +92,8 @@ class BlockingAccessibilityService : AccessibilityService() {
         mainScope.launch(Dispatchers.IO) {
             val current = BlockingPreferences.read(this@BlockingAccessibilityService)
             val tasks: List<TaskEntity> = if (current.ruleType == BlockingRuleType.PRIORITY_TASKS) {
-                runCatching { DatabaseProvider.get(this@BlockingAccessibilityService).taskDao().allForSync() }.getOrDefault(emptyList())
+                val activeOwner = getSharedPreferences("steady-sync", MODE_PRIVATE).getString("active_owner", LOCAL_OWNER_ID) ?: LOCAL_OWNER_ID
+                runCatching { DatabaseProvider.get(this@BlockingAccessibilityService).taskDao().allForSync(activeOwner) }.getOrDefault(emptyList())
             } else emptyList()
             val decision = BlockingRules.evaluate(current, foregroundPackage, tasks, LocalDateTime.now(), packageName)
             launch(Dispatchers.Main.immediate) {

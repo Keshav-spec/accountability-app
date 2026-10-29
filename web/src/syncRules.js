@@ -7,21 +7,23 @@ export function resolveConflict(local, remote) {
 
 export function taskToRow(task, userId) {
   return { id: task.id, title: task.title, notes: task.notes, scheduled_date: task.scheduledDate,
-    target_time: task.targetTime, status: task.status, created_at: task.createdAt,
+    target_time: task.targetTime, status: task.status, category: task.category ?? 'General', sort_order: task.sortOrder ?? 0,
+    recurrence_rule: task.recurrenceRule ?? 'none', series_id: task.seriesId ?? null, created_at: task.createdAt,
     updated_at: task.updatedAt, deleted_at: task.deletedAt ?? null, user_id: userId };
 }
 export function taskFromRow(row) {
   return { id: row.id, title: row.title, notes: row.notes, scheduledDate: row.scheduled_date, targetTime: row.target_time?.slice(0, 5) ?? null,
+    category: row.category ?? 'General', sortOrder: row.sort_order ?? 0, recurrenceRule: row.recurrence_rule ?? 'none', seriesId: row.series_id ?? null,
     status: row.status, createdAt: row.created_at, updatedAt: row.updated_at, deletedAt: row.deleted_at, syncPending: false };
 }
 export function checkInToRow(item, userId) {
   return { user_id: userId, date: item.date, morning_plan: item.morningPlan, priorities: item.priorities,
-    progress_note: item.progressNote, evening_reflection: item.eveningReflection, day_outcome: item.dayOutcome,
+    progress_note: item.progressNote, evening_reflection: item.eveningReflection, weekly_reflection: item.weeklyReflection ?? null, day_outcome: item.dayOutcome,
     created_at: item.createdAt, updated_at: item.updatedAt, deleted_at: item.deletedAt ?? null };
 }
 export function checkInFromRow(row) {
   return { date: row.date, morningPlan: row.morning_plan, priorities: row.priorities ?? [], progressNote: row.progress_note,
-    eveningReflection: row.evening_reflection, dayOutcome: row.day_outcome, createdAt: row.created_at,
+    eveningReflection: row.evening_reflection, weeklyReflection: row.weekly_reflection ?? null, dayOutcome: row.day_outcome, createdAt: row.created_at,
     updatedAt: row.updated_at, deletedAt: row.deleted_at, syncPending: false };
 }
 

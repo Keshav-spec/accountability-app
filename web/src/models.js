@@ -16,3 +16,20 @@ export function toggleComplete(task) {
 export function setTaskStatus(task, status) {
   return { ...task, status, updatedAt: new Date().toISOString() };
 }
+
+export function nextRecurringDate(date, rule) {
+  if (rule === 'none' || !rule) return null;
+  const next = new Date(`${date}T12:00:00`);
+  if (rule === 'daily') next.setDate(next.getDate() + 1);
+  else if (rule === 'weekly') next.setDate(next.getDate() + 7);
+  else if (rule === 'weekdays') {
+    do { next.setDate(next.getDate() + 1); } while (next.getDay() === 0 || next.getDay() === 6);
+  }
+  return today(next);
+}
+
+export function weekStart(date = new Date()) {
+  const start = new Date(date); start.setHours(12, 0, 0, 0);
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7));
+  return today(start);
+}

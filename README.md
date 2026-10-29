@@ -4,9 +4,11 @@
 
 <p>
   <a href="https://github.com/Keshav-spec/accountability-app"><img src="https://img.shields.io/badge/Project-GitHub-24292f?style=for-the-badge" alt="Project on GitHub"></a>
+  <a href="docs/PROJECT_GUIDE.md"><img src="https://img.shields.io/badge/Documentation-Project%20Guide-244237?style=for-the-badge" alt="Detailed project guide"></a>
   <a href="docs/STAGE3_SUPABASE.md"><img src="https://img.shields.io/badge/Setup-Accounts%20%26%20Sync-3f6b58?style=for-the-badge" alt="Accounts and sync setup"></a>
   <a href="docs/STAGE4_ANDROID_USAGE.md"><img src="https://img.shields.io/badge/Guide-Usage%20Dashboard-789b83?style=for-the-badge" alt="Android usage guide"></a>
   <a href="docs/STAGE5_ANDROID_BLOCKING.md"><img src="https://img.shields.io/badge/Guide-App%20Limits-244237?style=for-the-badge" alt="Android app limits guide"></a>
+  <a href="docs/STAGE6_DAILY_PLANNING.md"><img src="https://img.shields.io/badge/Guide-Daily%20Planning-567b63?style=for-the-badge" alt="Daily planning guide"></a>
 </p>
 
 ## Overview
@@ -16,8 +18,10 @@ Steady supports a calm daily routine across an Android app and a browser-based w
 ### Features
 
 - Create, edit, complete, skip, and reschedule tasks.
+- Add recurring tasks, reusable routines, categories, search, and custom ordering.
 - Plan up to three daily priorities, record progress, and save an evening reflection.
-- Configure local reminders, quiet hours, snoozes, and daily limits.
+- Record weekly reflections and choose a rest day without treating it as a failure.
+- Configure local reminders, presets, a personal reminder note, quiet hours, snoozes, and daily limits.
 - On Android, optionally view selected apps' daily usage totals and set non-blocking warning thresholds.
 - On Android, optionally enable an app pause overlay for chosen apps, with task-based or break-time rules and clear bypass controls.
 - Sign in and synchronize tasks and check-ins across devices when Supabase is configured.
@@ -75,7 +79,7 @@ The debug APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 Supabase is only needed for accounts and cross-device task/check-in sync. Local task, check-in, reminder, and usage features remain available without it.
 
-1. Create a Supabase project and apply [`supabase/migrations/20261025000000_stage3_sync.sql`](supabase/migrations/20261025000000_stage3_sync.sql).
+1. Create a Supabase project and apply the Stage 3 migration, then the [daily planning migration](supabase/migrations/20261029000000_stage6_daily_planning.sql).
 2. Follow [the Supabase setup guide](docs/STAGE3_SUPABASE.md) to configure email authentication, row-level security, redirect URLs, and local client settings.
 3. Copy `web/.env.example` to the ignored `web/.env.local`; set `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 4. Copy `android/local.properties.example` to the ignored `android/local.properties`; keep the correct `sdk.dir` and add `supabase.url` and `supabase.publishableKey`.
@@ -97,6 +101,7 @@ Use only the Supabase project URL and publishable (or legacy anon) key in client
 - [Stage 3: Supabase setup and sync checklist](docs/STAGE3_SUPABASE.md)
 - [Stage 4: Android usage access and device checklist](docs/STAGE4_ANDROID_USAGE.md)
 - [Stage 5: Android app blocking, recovery, and device checklist](docs/STAGE5_ANDROID_BLOCKING.md)
+- [Stage 6: daily planning and local data guide](docs/STAGE6_DAILY_PLANNING.md)
 - [Product requirements and privacy boundaries](docs/PRODUCT_REQUIREMENTS.md)
 
 Before a release, exercise the relevant manual checklist on the intended devices. This repository does not claim that Supabase sync has been validated against a live project or that Android usage reporting and blocking have been verified on a particular phone.

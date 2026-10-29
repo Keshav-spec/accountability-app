@@ -33,7 +33,8 @@ object ReminderScheduler {
         val db = DatabaseProvider.get(context)
         val repo = ReminderSettingsRepository(db.reminderSettingsDao())
         val settings = repo.get()
-        val pending = db.taskDao().pendingCount(LocalDate.now().toString()) > 0
+        val owner = context.getSharedPreferences("steady-sync", Context.MODE_PRIVATE).getString("active_owner", LOCAL_OWNER_ID) ?: LOCAL_OWNER_ID
+        val pending = db.taskDao().pendingCount(LocalDate.now().toString(), owner) > 0
         val now = LocalDateTime.now()
         val next = ReminderPolicy.next(now, asPreferences(settings), pending)
         val manager = WorkManager.getInstance(context)

@@ -61,14 +61,13 @@ fun UsageDashboardScreen(
     val selected = apps.count { it.included }
     val state = UsageRules.dashboardState(enabled, permission, selected, rows.any { it.totalMillis > 0 })
     Text("YOUR SPACE · DIGITAL BALANCE", style = MaterialTheme.typography.labelSmall, color = Color(0xFF414845), fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
-    Text("Mindful app limits", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = UsageInk, modifier = Modifier.padding(top = 5.dp))
-    Text("Optional, on-device totals for apps you choose.", color = Color(0xFF414845), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth().heightIn(max = 620.dp)) {
-        item {
+    Text("Mindful limits & pauses", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold, color = UsageInk, modifier = Modifier.padding(top = 5.dp))
+    Text("On-device app totals and gentle boundaries shaped around your day.", color = Color(0xFF414845), modifier = Modifier.padding(top = 4.dp, bottom = 12.dp))
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
             Surface(color = Color.White, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth()) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Your privacy", fontWeight = FontWeight.SemiBold, color = UsageSage)
-                    Text("Android requires Usage Access in system Settings. Steady checks daily totals only while this screen is open and only for apps you select. Totals and limits stay on this phone and are never synced. No background monitoring, content reading, or app blocking.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF68736F))
+                    Text("Android requires Usage Access in system Settings. Steady checks daily totals only while this screen is open and only for apps you select. Totals stay on this phone and are never synced. No background usage monitoring or content reading. Optional app pauses are configured below.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF68736F))
                     Text("Totals can be delayed or approximate depending on Android and your device.", style = MaterialTheme.typography.bodySmall, color = Color(0xFF68736F))
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text("Enable usage totals", modifier = Modifier.weight(1f), fontWeight = FontWeight.Medium)
@@ -83,17 +82,16 @@ fun UsageDashboardScreen(
                     }
                 }
             }
-        }
         if (!enabled) {
-            item { Text("Usage totals are off. Your saved app choices and limits stay on this device; saved totals are erased when you turn tracking off.", color = Color(0xFF68736F)) }
+            Text("Usage totals are off. Your saved app choices and limits stay on this device; saved totals are erased when you turn tracking off.", color = Color(0xFF68736F))
         } else {
             when (state) {
                 UsageDashboardState.NEEDS_ACCESS, UsageDashboardState.RESTRICTED, UsageDashboardState.UNAVAILABLE -> Unit
-                UsageDashboardState.EMPTY_SELECTION -> item { Text("Add an app to see its daily total or set a warning threshold.", color = Color(0xFF68736F)) }
-                UsageDashboardState.EMPTY -> item { Text("No usage totals are available for your selected apps yet today. Android may update them later.", color = Color(0xFF68736F)) }
+                UsageDashboardState.EMPTY_SELECTION -> Text("Add an app to see its daily total or set a warning threshold.", color = Color(0xFF68736F))
+                UsageDashboardState.EMPTY -> Text("No usage totals are available for your selected apps yet today. Android may update them later.", color = Color(0xFF68736F))
                 UsageDashboardState.READY -> {
-                    item { Text("TODAY’S TOTALS", style = MaterialTheme.typography.labelMedium, color = UsageSage, fontWeight = FontWeight.Bold) }
-                    items(rows.filter { it.setting.included }, key = { "usage-${it.setting.packageName}" }) { row ->
+                    Text("TODAY’S TOTALS", style = MaterialTheme.typography.labelMedium, color = UsageSage, fontWeight = FontWeight.Bold)
+                    rows.filter { it.setting.included }.forEach { row ->
                         Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(15.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -111,16 +109,14 @@ fun UsageDashboardScreen(
                 UsageDashboardState.DISABLED -> Unit
             }
             if (permission == UsagePermissionState.GRANTED) {
-                item {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                        Column(Modifier.weight(1f)) {
-                            Text("YOUR APPS", style = MaterialTheme.typography.labelMedium, color = UsageSage, fontWeight = FontWeight.Bold)
-                            Text("$selected selected", style = MaterialTheme.typography.bodySmall, color = Color(0xFF68736F))
-                        }
-                        Button(onClick = { showAppPicker = true }) { Text("Add app") }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Column(Modifier.weight(1f)) {
+                        Text("YOUR APPS", style = MaterialTheme.typography.labelMedium, color = UsageSage, fontWeight = FontWeight.Bold)
+                        Text("$selected selected", style = MaterialTheme.typography.bodySmall, color = Color(0xFF68736F))
                     }
+                    Button(onClick = { showAppPicker = true }) { Text("Add app") }
                 }
-                items(apps.filter { it.included }, key = { "settings-${it.packageName}" }) { app ->
+                apps.filter { it.included }.forEach { app ->
                     Surface(color = Color.White, shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -145,7 +141,7 @@ fun UsageDashboardScreen(
                 }
             }
         }
-        item { Spacer(Modifier.height(4.dp)) }
+        Spacer(Modifier.height(4.dp))
     }
     if (showAppPicker) {
         AppPickerDialog(

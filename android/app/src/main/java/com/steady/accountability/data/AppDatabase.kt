@@ -5,7 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [TaskEntity::class, DailyCheckInEntity::class, ReminderSettingsEntity::class, ReminderHistoryEntity::class, UsageTrackingEntity::class, UsageAppSettingEntity::class, UsageDailyAggregateEntity::class], version = 5, exportSchema = false)
+@Database(entities = [TaskEntity::class, DailyCheckInEntity::class, ReminderSettingsEntity::class, ReminderHistoryEntity::class, UsageTrackingEntity::class, UsageAppSettingEntity::class, UsageDailyAggregateEntity::class], version = 7, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     abstract fun checkInDao(): CheckInDao
@@ -42,6 +42,25 @@ abstract class AppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS reminder_history (id TEXT NOT NULL PRIMARY KEY, occurredAtMillis INTEGER NOT NULL, reason TEXT NOT NULL)")
                 db.execSQL("CREATE INDEX IF NOT EXISTS index_reminder_history_occurredAtMillis ON reminder_history(occurredAtMillis)")
+            }
+        }
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN ownerId TEXT NOT NULL DEFAULT 'local'")
+                db.execSQL("CREATE TABLE daily_check_ins_new (date TEXT NOT NULL, morningPlan TEXT, eveningReflection TEXT, prioritiesText TEXT NOT NULL DEFAULT '', progressNote TEXT, dayOutcome TEXT, createdAt TEXT NOT NULL, updatedAt TEXT NOT NULL, deletedAt TEXT, syncPending INTEGER NOT NULL DEFAULT 0, ownerId TEXT NOT NULL DEFAULT 'local', PRIMARY KEY(date, ownerId))")
+                db.execSQL("INSERT INTO daily_check_ins_new (date, morningPlan, eveningReflection, prioritiesText, progressNote, dayOutcome, createdAt, updatedAt, deletedAt, syncPending, ownerId) SELECT date, morningPlan, eveningReflection, prioritiesText, progressNote, dayOutcome, createdAt, updatedAt, deletedAt, syncPending, 'local' FROM daily_check_ins")
+                db.execSQL("DROP TABLE daily_check_ins")
+                db.execSQL("ALTER TABLE daily_check_ins_new RENAME TO daily_check_ins")
+            }
+        }
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN category TEXT NOT NULL DEFAULT 'General'")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN sortOrder INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN recurrenceRule TEXT NOT NULL DEFAULT 'none'")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN seriesId TEXT")
+                db.execSQL("ALTER TABLE daily_check_ins ADD COLUMN weeklyReflection TEXT")
+                db.execSQL("ALTER TABLE reminder_settings ADD COLUMN reminderContext TEXT NOT NULL DEFAULT 'One small step is enough.'")
             }
         }
     }

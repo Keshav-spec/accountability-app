@@ -27,10 +27,11 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val settingsRepo = ReminderSettingsRepository(db.reminderSettingsDao())
         val settings = settingsRepo.get()
         val now = LocalDateTime.now()
-        val pending = db.taskDao().pendingCount(LocalDate.now().toString()) > 0
+        val activeOwner = applicationContext.getSharedPreferences("steady-sync", Context.MODE_PRIVATE).getString("active_owner", LOCAL_OWNER_ID) ?: LOCAL_OWNER_ID
+        val pending = db.taskDao().pendingCount(LocalDate.now().toString(), activeOwner) > 0
         val date = LocalDate.now().toString()
-        val plannedTasks = db.taskDao().allForSync().filter { it.scheduledDate == date && it.status == TaskStatus.PLANNED.name && it.deletedAt == null }
-        val priorities = db.checkInDao().all().firstOrNull { it.date == date }?.prioritiesText
+        val plannedTasks = db.taskDao().allForSync(activeOwner).filter { it.scheduledDate == date && it.status == TaskStatus.PLANNED.name && it.deletedAt == null }
+        val priorities = db.checkInDao().all(activeOwner).firstOrNull { it.date == date }?.prioritiesText
             ?.lineSequence()?.map(String::trim)?.filter(String::isNotBlank)?.toSet().orEmpty()
         val plannedPriorityCount = plannedTasks.count { task -> priorities.any { it.equals(task.title.trim(), ignoreCase = true) } }
         val reason = if (plannedPriorityCount > 0) {
@@ -49,7 +50,7 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
             val slotsToday = if (prefs.deliveredDate == now.toLocalDate()) prefs.deliveredSlots else emptySet()
             // Persist the idempotency key before posting so a retry cannot produce a duplicate.
             settingsRepo.save(settings.copy(deliveredDate = now.toLocalDate().toString(), deliveredCount = countToday + 1, deliveredSlots = (slotsToday + slot).joinToString("|"), snoozeUntilMillis = if (slot.startsWith("snooze:")) null else settings.snoozeUntilMillis))
-            postNotification(applicationContext, settings.snoozeMinutes, reason)
+            postNotification(applicationContext, settings.snoozeMinutes, reason, settings.reminderContext)
             db.reminderHistoryDao().add(ReminderHistoryEntity(UUID.randomUUID().toString(), System.currentTimeMillis(), reason))
             db.reminderHistoryDao().trim()
         }
@@ -57,7 +58,7 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
         Result.success()
     }
 
-    private fun postNotification(context: Context, snoozeMinutes: Int, reason: String) {
+    private fun postNotification(context: Context, snoozeMinutes: Int, reason: String, reminderContext: String) {
         val channelId = "steady_reminders"
         val manager = context.getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= 26) manager.createNotificationChannel(NotificationChannel(channelId, "Steady reminders", NotificationManager.IMPORTANCE_DEFAULT))
@@ -66,7 +67,7 @@ class ReminderWorker(context: Context, parameters: WorkerParameters) : Coroutine
         val notification = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("A gentle check-in")
-            .setContentText("A gentle nudge: $reason One small step is enough.")
+            .setContentText("$reason ${reminderContext.ifBlank { "One small step is enough." }}")
             .setContentIntent(open)
             .setAutoCancel(true)
             .addAction(android.R.drawable.ic_lock_idle_alarm, "Snooze", actionIntent(ReminderActionReceiver.ACTION_SNOOZE, 12))

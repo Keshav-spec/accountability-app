@@ -26,7 +26,7 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/blocking_accessibility_service" />
         </service>
-        <activity android:name=".MainActivity" android:exported="true">
+        <activity android:name=".MainActivity" android:exported="true" android:launchMode="singleTop">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

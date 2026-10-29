@@ -23,6 +23,7 @@ data class ReminderSettingsEntity(
     val deliveredDate: String? = null,
     val deliveredCount: Int = 0,
     val deliveredSlots: String = "",
+    val reminderContext: String = "One small step is enough.",
 )
 
 @Dao

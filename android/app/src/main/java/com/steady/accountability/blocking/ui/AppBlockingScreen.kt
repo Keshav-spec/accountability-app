@@ -85,12 +85,9 @@ fun AppBlockingScreen(
         confirmButton = { TextButton(onClick = { showApps = false; search = "" }) { Text("Done") } },
     )
 
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 24.dp)) {
-        item {
-            Text("App limits", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.SemiBold)
-            Text("A gentle pause for the apps you choose. Blocking is off until you opt in.", style = MaterialTheme.typography.bodyMedium)
-        }
-        item {
+    Column(verticalArrangement = Arrangement.spacedBy(14.dp), modifier = Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
+        Text("App blocking & gentle pauses", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+        Text("A gentle pause for the apps you choose. Blocking is off until you opt in.", style = MaterialTheme.typography.bodyMedium)
             Card(shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) { Text("Blocking", fontWeight = FontWeight.SemiBold); Text("Off by default · always bypassable", style = MaterialTheme.typography.bodySmall) }
@@ -107,8 +104,6 @@ fun AppBlockingScreen(
                     TextButton(onClick = onRefreshAccess) { Text("Refresh") }
                 }
             } }
-        }
-        item {
             Card(shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text("Your rule", fontWeight = FontWeight.SemiBold)
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -136,8 +131,6 @@ fun AppBlockingScreen(
                 if (draft.ruleType == BlockingRuleType.BREAK_TIME) OutlinedTextField(draft.breakTime, { draft = draft.copy(breakTime = it) }, label = { Text("Break time (HH:MM)") }, singleLine = true)
                 OutlinedTextField(draft.breakDurationMinutes.toString(), { value -> value.toIntOrNull()?.takeIf { it in 5..120 }?.let { draft = draft.copy(breakDurationMinutes = it) } }, label = { Text("Take a break (5–120 minutes)") }, singleLine = true)
             } }
-        }
-        item {
             Card(shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Selected apps", fontWeight = FontWeight.SemiBold)
                 if (draft.blockedPackages.isEmpty()) Text("No apps selected yet.")
@@ -151,8 +144,6 @@ fun AppBlockingScreen(
                 }
                 OutlinedButton(onClick = { showApps = true }, modifier = Modifier.fillMaxWidth()) { Text("Add or choose apps") }
             } }
-        }
-        item {
             Card(shape = RoundedCornerShape(20.dp)) { Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("Safety controls", fontWeight = FontWeight.SemiBold)
                 Text("System settings, the phone app, your launcher, Steady, and the apps you mark as exceptions remain available. Android may delay or stop background services; we do not bypass battery settings.", style = MaterialTheme.typography.bodySmall)
@@ -175,7 +166,6 @@ fun AppBlockingScreen(
                 }, modifier = Modifier.fillMaxWidth()) { Text("Save blocking settings") }
                 validation?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             } }
-        }
     }
 }
 

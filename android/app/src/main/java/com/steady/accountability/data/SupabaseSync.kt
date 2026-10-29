@@ -5,6 +5,7 @@ import io.github.jan.supabase.createSupabaseClient
 import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.auth.providers.builtin.Email
+import io.github.jan.supabase.auth.providers.Google
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.postgrest.from
 import kotlinx.serialization.SerialName
@@ -25,6 +26,9 @@ object SupabaseSync {
         }
     }
     suspend fun signIn(email: String, password: String) = client.auth.signInWith(Email) { this.email = email; this.password = password }
+    suspend fun signInWithGoogle() = client.auth.signInWith(Google)
+    suspend fun linkGoogle() = client.auth.linkIdentity(Google)
+    suspend fun requestPasswordReset(email: String) = client.auth.resetPasswordForEmail(email)
     suspend fun signUp(email: String, password: String, displayName: String) = client.auth.signUpWith(Email) {
         this.email = email
         this.password = password
@@ -48,26 +52,25 @@ object SupabaseSync {
 
     suspend fun sync(tasks: TaskDao, checkIns: CheckInDao, saveOwner: (String) -> Unit, currentOwner: String?): String {
         val userId = userId() ?: return "Sign in to sync"
-        if (currentOwner != null && currentOwner != userId) return "Local data belongs to another account"
         saveOwner(userId)
         val remoteTasks = client.from("tasks").select().decodeList<RemoteTask>()
         val remoteCheckIns = client.from("daily_check_ins").select().decodeList<RemoteCheckIn>()
         val taskById = remoteTasks.associateBy { it.id }
         val checkInByDate = remoteCheckIns.associateBy { it.date }
-        val localTasks = tasks.allForSync()
+        val localTasks = tasks.allForSync(userId)
         for (local in localTasks) {
             val remote = taskById[local.id]
             if (SyncRules.localWins(local.updatedAt, remote?.updatedAt)) {
                 client.from("tasks").upsert(local.toRemote(userId)) { onConflict = "id" }
-                tasks.markSynced(local.id)
+                tasks.markSynced(local.id, userId)
             } else if (remote != null) tasks.upsert(remote.toLocal())
         }
-        val localCheckIns = checkIns.allForSync()
+        val localCheckIns = checkIns.allForSync(userId)
         for (local in localCheckIns) {
             val remote = checkInByDate[local.date]
             if (SyncRules.localWins(local.updatedAt, remote?.updatedAt)) {
                 client.from("daily_check_ins").upsert(local.toRemote(userId)) { onConflict = "user_id,date" }
-                checkIns.markSynced(local.date)
+                checkIns.markSynced(local.date, userId)
             } else if (remote != null) checkIns.saveCheckIn(remote.toLocal())
         }
         for (remote in remoteTasks) if (localTasks.none { it.id == remote.id }) tasks.upsert(remote.toLocal())
@@ -95,6 +98,8 @@ data class RemoteTask(
     @SerialName("scheduled_date") val scheduledDate: String, @SerialName("target_time") val targetTime: String? = null,
     val status: String, @SerialName("created_at") val createdAt: String, @SerialName("updated_at") val updatedAt: String,
     @SerialName("deleted_at") val deletedAt: String? = null, @SerialName("user_id") val userId: String,
+    val category: String = "General", @SerialName("sort_order") val sortOrder: Int = 0,
+    @SerialName("recurrence_rule") val recurrenceRule: String = "none", @SerialName("series_id") val seriesId: String? = null,
 )
 
 @Serializable
@@ -104,9 +109,10 @@ data class RemoteCheckIn(
     @SerialName("evening_reflection") val eveningReflection: String? = null, @SerialName("day_outcome") val dayOutcome: String? = null,
     @SerialName("created_at") val createdAt: String, @SerialName("updated_at") val updatedAt: String,
     @SerialName("deleted_at") val deletedAt: String? = null,
+    @SerialName("weekly_reflection") val weeklyReflection: String? = null,
 )
 
-private fun TaskEntity.toRemote(userId: String) = RemoteTask(id, title, notes, scheduledDate, targetTime, status.lowercase(), createdAt, updatedAt, deletedAt, userId)
-private fun RemoteTask.toLocal() = TaskEntity(id, title, notes, scheduledDate, targetTime?.take(5), status.uppercase(), createdAt, updatedAt, deletedAt, false)
-private fun DailyCheckInEntity.toRemote(userId: String) = RemoteCheckIn(userId, date, morningPlan, prioritiesText.lines().filter(String::isNotBlank), progressNote, eveningReflection, dayOutcome, createdAt, updatedAt, deletedAt)
-private fun RemoteCheckIn.toLocal() = DailyCheckInEntity(date, morningPlan, eveningReflection, priorities.joinToString("\n"), progressNote, dayOutcome, createdAt, updatedAt, deletedAt, false)
+private fun TaskEntity.toRemote(userId: String) = RemoteTask(id, title, notes, scheduledDate, targetTime, status.lowercase(), createdAt, updatedAt, deletedAt, userId, category, sortOrder, recurrenceRule, seriesId)
+private fun RemoteTask.toLocal() = TaskEntity(id, title, notes, scheduledDate, targetTime?.take(5), status.uppercase(), createdAt, updatedAt, deletedAt, false, userId, category, sortOrder, recurrenceRule, seriesId)
+private fun DailyCheckInEntity.toRemote(userId: String) = RemoteCheckIn(userId, date, morningPlan, prioritiesText.lines().filter(String::isNotBlank), progressNote, eveningReflection, dayOutcome, createdAt, updatedAt, deletedAt, weeklyReflection)
+private fun RemoteCheckIn.toLocal() = DailyCheckInEntity(date, morningPlan, eveningReflection, priorities.joinToString("\n"), progressNote, dayOutcome, createdAt, updatedAt, deletedAt, false, userId, weeklyReflection)
